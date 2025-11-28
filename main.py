@@ -16,18 +16,32 @@ logger = logging.getLogger("simulateur")
 # =====================
 # GOOGLE SHEETS via ENV
 # =====================
-creds_info = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+try:
+    creds_info = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+except Exception as e:
+    logger.error(f"Impossible de lire GOOGLE_CREDS_JSON: {e}")
+    creds_info = None
 
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-client = gspread.authorize(creds)
+try:
+    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+    client = gspread.authorize(creds)
+except Exception as e:
+    logger.error(f"Erreur authentification Google Sheets: {e}")
+    client = None
 
 sheet_name = os.getenv("SHEET_NAME")
-sheet = client.open(sheet_name).sheet1
+sheet = None
+if client:
+    try:
+        sheet = client.open(sheet_name).sheet1
+        logger.info(f"Sheet '{sheet_name}' ouvert avec succès")
+    except Exception as e:
+        logger.error(f"Erreur ouverture sheet '{sheet_name}': {e}")
 
 # =====================
 # FASTAPI
@@ -102,14 +116,18 @@ async def submit_form(request: Request):
         data.get("souhaits", "")
     ]
 
+    if sheet is None:
+        logger.error("Sheet non initialisé, impossible d'écrire")
+        return {"status": "error", "message": "Sheet not initialized"}
+
     # =====================
     # GOOGLE SHEET SAFE WRITE AVEC RETRY
     # =====================
     max_attempts = 3
-
     for attempt in range(max_attempts):
         try:
             sheet.append_row(row)
+            logger.info(f"Ligne ajoutée avec succès dans '{sheet_name}'")
             break
         except Exception as e:
             logger.error(f"Erreur Google Sheet (tentative {attempt+1}) : {e}")
