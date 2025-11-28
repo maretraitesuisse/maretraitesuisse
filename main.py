@@ -1,69 +1,66 @@
-import os
-import json
-import gspread
-from fastapi import FastAPI, Request
-from google.oauth2.service_account import Credentials
-from fastapi.middleware.cors import CORSMiddleware
 import logging
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# ======================================================
-# LOGGING POUR DEBUG SHOPIFY
-# ======================================================
+# =====================
+# LOGS
+# =====================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("simulateur")
 
+# =====================
+# GOOGLE SHEETS
+# =====================
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
+
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(creds)
+
+SPREADSHEET_NAME = "simulateur-retraite"
+sheet = client.open(SPREADSHEET_NAME).sheet1
+
+# =====================
+# FASTAPI
+# =====================
 app = FastAPI()
 
-# ======================================================
-# CORS – COMPATIBLE SHOPIFY AVEC PREFLIGHT COMPLET
-# ======================================================
+# =====================
+# CORS Shopify
+# =====================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tu pourras restreindre plus tard à ton domaine Shopify
+    allow_origins=[
+        "*",
+        "https://maretraitesuisse.myshopify.com",
+        "https://maretraitesuisse.ch",
+        "https://www.maretraitesuisse.ch"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ======================================================
-# CHARGEMENT GOOGLE SHEET
-# ======================================================
-creds_info = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-
-scopes = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-
-creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-client = gspread.authorize(creds)
-
-sheet_name = os.getenv("SHEET_NAME")
-sheet = client.open(sheet_name).sheet1
-
-# ======================================================
-# ENDPOINTS
-# ======================================================
-
-@app.get("/ping")
-def ping():
-    return {"status": "alive"}
-
-
-# ----------- DEBUG : VOIR CE QUE SHOPIFY ENVOIE ----------- #
+# =====================
+# DEBUG
+# =====================
 @app.post("/debug")
 async def debug(request: Request):
     body = await request.body()
-    logger.info("========== REQUÊTE SHOPIFY ==========")
-    logger.info(f"Headers: {request.headers}")
     logger.info(f"Body: {body}")
     logger.info("=====================================")
-    return {"received": True, "raw_body": body.decode()}
+    return {"status": "received"}
 
-
-# ----------- SUBMIT FORMULAIRE ----------- #
+# =====================
+# SUBMIT (NOUVEAU CODE)
+# =====================
 @app.post("/submit")
 async def submit_form(request: Request):
+    # Lecture JSON
     try:
         data = await request.json()
     except Exception as e:
@@ -73,6 +70,7 @@ async def submit_form(request: Request):
     logger.info("===== Nouveau formulaire reçu =====")
     logger.info(data)
 
+    # Prépare la ligne à enregistrer
     row = [
         data.get("prenom", ""),
         data.get("nom", ""),
@@ -94,11 +92,19 @@ async def submit_form(request: Request):
         data.get("souhaits", "")
     ]
 
-    try:
-        sheet.append_row(row)
-    except Exception as e:
-        logger.error(f"Erreur Google Sheet : {e}")
-        return {"status": "error", "message": "Sheet error"}
+    # Tentatives Google Sheets
+    import time
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        try:
+            sheet.append_row(row)
+            break
+        except Exception as e:
+            logger.error(f"Erreur Google Sheet (tentative {attempt+1}) : {e}")
+            time.sleep(1)
+            if attempt == max_attempts - 1:
+                return {"status": "error", "message": "Sheet error"}
 
     return {"status": "success"}
 
