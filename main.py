@@ -1,8 +1,11 @@
+import os
+import json
+import time
 import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from google.oauth2.service_account import Credentials
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 # =====================
 # LOGS
@@ -11,18 +14,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("simulateur")
 
 # =====================
-# GOOGLE SHEETS
+# GOOGLE SHEETS via ENV
 # =====================
-scope = [
-    "https://spreadsheets.google.com/feeds",
+creds_info = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+
+scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
 client = gspread.authorize(creds)
 
-SPREADSHEET_NAME = "simulateur-retraite"
-sheet = client.open(SPREADSHEET_NAME).sheet1
+sheet_name = os.getenv("SHEET_NAME")
+sheet = client.open(sheet_name).sheet1
 
 # =====================
 # FASTAPI
@@ -46,6 +51,13 @@ app.add_middleware(
 )
 
 # =====================
+# ENDPOINT PING
+# =====================
+@app.get("/ping")
+def ping():
+    return {"status": "alive"}
+
+# =====================
 # DEBUG
 # =====================
 @app.post("/debug")
@@ -56,11 +68,10 @@ async def debug(request: Request):
     return {"status": "received"}
 
 # =====================
-# SUBMIT (NOUVEAU CODE)
+# SUBMIT FORMULAIRE
 # =====================
 @app.post("/submit")
 async def submit_form(request: Request):
-    # Lecture JSON
     try:
         data = await request.json()
     except Exception as e:
@@ -70,7 +81,6 @@ async def submit_form(request: Request):
     logger.info("===== Nouveau formulaire reçu =====")
     logger.info(data)
 
-    # Prépare la ligne à enregistrer
     row = [
         data.get("prenom", ""),
         data.get("nom", ""),
@@ -92,8 +102,9 @@ async def submit_form(request: Request):
         data.get("souhaits", "")
     ]
 
-    # Tentatives Google Sheets
-    import time
+    # =====================
+    # GOOGLE SHEET SAFE WRITE AVEC RETRY
+    # =====================
     max_attempts = 3
 
     for attempt in range(max_attempts):
