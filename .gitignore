@@ -1,0 +1,5 @@
+cle-admin-sheet-access.json
+.env
+.DS_Store
+__pycache__/
+*.json
