@@ -102,35 +102,41 @@ def read_sheet():
 # ---------------------------------------------------------------------
 # /submit — Sauvegarde du formulaire Shopify dans Google Sheets
 # ---------------------------------------------------------------------
-
 @app.post("/submit")
 async def submit_form(data: dict):
 
-    # IMPORTANT : L'ordre doit correspondre EXACTEMENT au Sheet
+    # Harmonisation automatique des noms Shopify → Backend
+    statut = data.get("situation", data.get("statut_civil", ""))
+    revenu_annuel_brut = data.get("revenu_brut", data.get("revenu_annuel_brut", ""))
+    annees_cotisees = data.get("annees_avs", data.get("annees_cotisees", ""))
+    be = data.get("annees_be", data.get("be", ""))
+    ba = data.get("annees_ba", data.get("ba", ""))
+
     row = [
         data.get("prenom", ""),
         data.get("nom", ""),
         data.get("email", ""),
         data.get("telephone", ""),
-        data.get("statut_civil", ""),
+        statut,
         data.get("age_actuel", ""),
         data.get("age_retraite", ""),
         data.get("salaire_annuel", ""),
-        data.get("revenu_annuel_brut", ""),
+        revenu_annuel_brut,
         data.get("salaire_moyen_avs", ""),
-        data.get("annees_cotisees", ""),
-        data.get("be", ""),
-        data.get("ba", ""),
+        annees_cotisees,
+        be,
+        ba,
         data.get("capital_lpp", ""),
         data.get("rente_conjoint", ""),
         data.get("annees_suisse", ""),
         data.get("canton", ""),
-        data.get("souhaits", ""),
+        data.get("souhaits", "")
     ]
 
     append_to_sheet(row)
 
-    return {"status": "ok", "message": "Données enregistrées"}
+    # Shopify adore recevoir success:true
+    return {"success": True, "message": "Données enregistrées"}
 
 
 # ---------------------------------------------------------------------
