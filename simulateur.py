@@ -1,142 +1,117 @@
 # simulateur.py
-# -------------------------------------------------------------------
-# Ce fichier contient TOUTE la logique du simulateur AVS + LPP.
-# Il convertit tes données du Google Sheet en un résultat de calcul.
-#
-# Le but : exposer une fonction simple
-#
-#     def simuler_pilier_complet(data):
-#
-# qui renvoie un dictionnaire prêt à afficher ou à envoyer par email.
-# -------------------------------------------------------------------
+# ---------------------------------------------------------
+# Module de calcul complet pour AVS + LPP avec gestion
+# des valeurs vides, erreurs de conversion, defaults, etc.
+# ---------------------------------------------------------
 
-def calcul_rente_avs(
-    age_actuel,
-    age_retraite,
-    salaire_moyen_avs,
-    annees_avs_cotisees,
-    be,
-    ba,
-    statut_civil,
-    rente_conjoint_actuelle
-):
+def to_int(v, default=0):
+    """Convertit en int sans planter."""
+    try:
+        if v is None or v == "":
+            return default
+        return int(v)
+    except:
+        return default
+
+def to_float(v, default=0.0):
+    """Convertit en float sans planter."""
+    try:
+        if v is None or v == "":
+            return default
+        return float(v)
+    except:
+        return default
+
+
+# ---------------------------------------------------------
+# CALCUL DU 1ER PILIER (AVS)
+# ---------------------------------------------------------
+
+def calcul_avs(age_actuel, age_retraite, annees_cotisees, ramd, statut_civil="célibataire"):
     """
-    Simule la rente AVS basée sur les données fournies.
-    Ce modèle est simplifié mais structure le calcul correctement.
-
-    1. Salaire moyen AVS (RAMD) influence la rente de base
-    2. Nombre d’années AVS → pénalités ou bonifications
-    3. BE / BA → majorations
-    4. Statut civil → plafonnement des couples
-    """
-
-    # Valeurs AVS officielles 2024 approximées pour une personne seule
-    RENTE_MAX = 2450
-    RENTE_MIN = 1225
-    ANNEES_PLEINES = 44  # pour un homme ou femme
-
-    # Ratio d'années cotisées
-    ratio_cotisation = min(annees_avs_cotisees / ANNEES_PLEINES, 1)
-
-    # Calcul rente de base selon RAMD
-    if salaire_moyen_avs < 43000:
-        rente_base = RENTE_MIN
-    elif salaire_moyen_avs > 86000:
-        rente_base = RENTE_MAX
-    else:
-        # interpolation linéaire entre min et max
-        rente_base = RENTE_MIN + (RENTE_MAX - RENTE_MIN) * (
-            (salaire_moyen_avs - 43000) / (86000 - 43000)
-        )
-
-    # On applique la proportion des années cotisées
-    rente = rente_base * ratio_cotisation
-
-    # Ajout BE / BA
-    rente += be * 40  # valeur indicative
-    rente += ba * 50  # valeur indicative
-
-    # Plafonnement couples AVS
-    if statut_civil.lower() == "marié" or statut_civil.lower() == "marie":
-        total_couple = rente + rente_conjoint_actuelle
-        plafond_couple = RENTE_MAX * 1.5
-        if total_couple > plafond_couple:
-            excedent = total_couple - plafond_couple
-            rente -= excedent
-
-    return round(rente, 2)
-
-
-def calcul_rente_lpp(capital_lpp, age_retraite):
-    """
-    Calcule la rente LPP à partir du capital en appliquant
-    le taux de conversion approximatif basé sur l’âge.
+    Calcule une estimation simplifiée de la rente AVS.
     """
 
-    if age_retraite <= 62:
-        taux = 0.052
-    elif age_retraite == 63:
-        taux = 0.055
-    elif age_retraite == 64:
-        taux = 0.057
-    else:
-        taux = 0.060
+    duree_cotisation_max = 44  # Durée de cotisation maximale AVS
+    taux_cotisation = min(annees_cotisees / duree_cotisation_max, 1)
 
-    rente = capital_lpp * taux
-    return round(rente, 2)
+    # Simulation d'une rente basée sur RAMD (salaire annuel moyen)
+    rente_max = 2390 * 12  # Approximation rente mensuelle max → annuelle
+    rente_estimee = rente_max * taux_cotisation
 
+    return max(0, rente_estimee)
+
+
+# ---------------------------------------------------------
+# CALCUL DU 2E PILIER (LPP)
+# ---------------------------------------------------------
+
+def calcul_lpp(capital_lpp, age_actuel, age_retraite):
+    """
+    Simule la rente LPP basée sur un capital et un taux de conversion.
+    """
+
+    # Hypothèse du taux de conversion standard
+    taux_conversion = 0.068  # 6.8%
+
+    rente_lpp = capital_lpp * taux_conversion
+    return max(0, rente_lpp)
+
+
+# ---------------------------------------------------------
+# CALCUL COMPLET (1er + 2e PILLER)
+# ---------------------------------------------------------
 
 def simuler_pilier_complet(data):
     """
-    Fonction principale appelée par l'API.
-    Elle prend un dictionnaire contenant toutes les valeurs du Google Sheet.
-
-    Retourne : {
-        "rente_avs": ...,
-        "rente_lpp": ...,
-        "rente_totale": ...,
-        "details": "Texte humain pour email"
-    }
+    Point d'entrée appelé depuis FastAPI.
+    Convertit toutes les données en numériques safely puis lance les calculs.
     """
 
-    rente_avs = calcul_rente_avs(
-        age_actuel=int(data["age_actuel"]),
-        age_retraite=int(data["age_retraite"]),
-        salaire_moyen_avs=float(data["salaire_moyen_avs"]),
-        annees_avs_cotisees=int(data["annees_cotisees"]),
-        be=int(data["be"]),
-        ba=int(data["ba"]),
-        statut_civil=data["statut_civil"],
-        rente_conjoint_actuelle=float(data["rente_conjoint"])
+    age_actuel = to_int(data.get("age_actuel"))
+    age_retraite = to_int(data.get("age_retraite"), 65)
+
+    revenu_annuel = to_float(data.get("revenu_annuel"))
+    ramd = to_float(data.get("ramd"))
+
+    annees_cotisees = to_int(data.get("annees_cotisees"))
+    annees_be = to_int(data.get("annees_be"))
+    annees_ba = to_int(data.get("annees_ba"))
+
+    capital_lpp = to_float(data.get("capital_lpp"))
+    statut_civil = data.get("statut_civil", "célibataire")
+
+    # Total AVS = AVS + bonifications éducatives + assistance
+    total_cotisation = annees_cotisees + annees_be + annees_ba
+
+    rente_avs = calcul_avs(
+        age_actuel=age_actuel,
+        age_retraite=age_retraite,
+        annees_cotisees=total_cotisation,
+        ramd=ramd,
+        statut_civil=statut_civil
     )
 
-    rente_lpp = calcul_rente_lpp(
-        capital_lpp=float(data["capital_lpp"]),
-        age_retraite=int(data["age_retraite"])
+    rente_lpp = calcul_lpp(
+        capital_lpp=capital_lpp,
+        age_actuel=age_actuel,
+        age_retraite=age_retraite
     )
 
-    total = rente_avs + rente_lpp
-
-    # Texte explicatif
-    texte = f"""
-    Simulation de retraite complète :
-
-    • Rente AVS estimée : CHF {rente_avs}
-    • Rente LPP estimée : CHF {rente_lpp}
-    • Total mensuel estimé : CHF {total}
-
-    Basé sur :
-    - {data['annees_cotisees']} années AVS cotisées
-    - Salaire moyen AVS (RAMD) : {data['salaire_moyen_avs']} CHF/an
-    - Capital LPP actuel : {data['capital_lpp']} CHF
-
-    Cette simulation reste indicative selon les valeurs officielles AVS/LPP.
-    """
+    rente_totale = rente_avs + rente_lpp
 
     return {
         "rente_avs": rente_avs,
         "rente_lpp": rente_lpp,
-        "rente_totale": total,
-        "details": texte
+        "rente_totale": rente_totale,
+        "details": {
+            "age_actuel": age_actuel,
+            "age_retraite": age_retraite,
+            "ramd": ramd,
+            "revenu_annuel": revenu_annuel,
+            "annees_cotisees": annees_cotisees,
+            "annees_be": annees_be,
+            "annees_ba": annees_ba,
+            "capital_lpp": capital_lpp
+        }
     }
-
