@@ -5,12 +5,13 @@ from fastapi import FastAPI
 from google.oauth2.service_account import Credentials
 from fastapi.middleware.cors import CORSMiddleware
 
+app = FastAPI()
 
 @app.get("/")
 def root():
     return {"status": "ok"}
 
-app = FastAPI()
+
 
 # Autoriser Shopify (frontend) à contacter ton backend
 app.add_middleware(
