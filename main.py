@@ -249,22 +249,34 @@ def calcul_email(email: str):
 # ==========================================================
 @app.post("/envoyer-mail-email")
 
-def index_from_email(email: str):
-    email_clean = email.strip().lower()
 
+
+import unicodedata
+import re
+
+def clean(s: str):
+    if not s:
+        return ""
+    # enlever accents + caractères UTF bizarres
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("ascii", "ignore").decode("ascii")
+    # enlever caractères non visibles
+    s = re.sub(r"[^ -~]", "", s)
+    return s.strip().lower()
+
+
+def index_from_email(email: str):
     rows = sheet.get_all_values()
 
-    for i in range(1, len(rows)):  # i=1 pour ignorer l'en-tête
+    email_clean = clean(email)
+
+    for i in range(1, len(rows)):  # sauter entête
         if len(rows[i]) < 3:
             continue
 
-        email_sheet = rows[i][2].strip().lower()
+        email_sheet = clean(rows[i][2])
 
-        # On ignore tous les caractères invisibles
-        email_sheet = "".join(c for c in email_sheet if c.isprintable())
-        email_clean2 = "".join(c for c in email_clean if c.isprintable())
-
-        if email_sheet == email_clean2:
+        if email_clean == email_sheet:
             return i
 
     return -1
