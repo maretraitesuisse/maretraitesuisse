@@ -1,3 +1,6 @@
+print("=== BACKEND CHARGÉ DEPUIS CE FICHIER ===")
+
+
 import os
 import json
 import gspread
