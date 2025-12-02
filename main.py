@@ -1,265 +1,169 @@
-# main.py
-# ---------------------------------------------------------------------
-# Backend FastAPI pour MARETRAITE SUISSE
-# Gère :
-#  - soumission de formulaire
-#  - communication avec Google Sheets
-#  - simulation AVS + LPP
-#  - envoi d'email
-#  - consultation des données pour l'admin Shopify
-# ---------------------------------------------------------------------
-
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from simulateur import simuler_pilier_complet
 import os
+import json
+import gspread
+import uuid
+import time
 import smtplib
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-
-# ---------------------------------------------------------------------
-# INITIALISATION FASTAPI
-# ---------------------------------------------------------------------
 
 app = FastAPI()
 
-# Autorise Shopify + navigateur
+# ---- CORS (Shopify + Render)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Racine pour Render
-@app.get("/")
-def root():
-    return {"status": "ok"}
+# ---- Google Sheets (Render ENV)
+creds_info = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+client = gspread.authorize(creds)
+sheet = client.open(os.getenv("SHEET_NAME")).sheet1
+
+# ---- Mémoire interne (cache simple)
+admin_tokens = {}  # {token: expiration_timestamp}
+form_data = []     # données envoyées par Shopify
+form_status = []   # sent/pending
 
 @app.get("/ping")
 def ping():
     return {"status": "alive"}
 
 
-# ---------------------------------------------------------------------
-# PARTIE GOOGLE SHEETS
-# ---------------------------------------------------------------------
-
-# Identifiants dans variable d'environnement RENDER
-SHEET_CREDENTIALS = os.getenv("GOOGLE_SHEET_CREDENTIALS")
-SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
-
-if not SHEET_CREDENTIALS:
-    raise Exception("⚠ GOOGLE_SHEET_CREDENTIALS n'est pas configuré dans Render.")
-
-# Convertit la variable d'environnement JSON → dictionnaire
-import json
-service_account_info = json.loads(SHEET_CREDENTIALS)
-
-# Scopes Google Sheets
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-
-# On construit le client Google
-credentials = Credentials.from_service_account_info(
-    service_account_info, scopes=SCOPES
-)
-
-service = build("sheets", "v4", credentials=credentials)
-sheet = service.spreadsheets()
-
-
-def append_to_sheet(values):
-    """
-    Ajoute une ligne complète au Google Sheet.
-    `values` doit être une liste ordonnée correspondant aux colonnes.
-    """
-    result = sheet.values().append(
-        spreadsheetId=SHEET_ID,
-        range="A:Z",
-        valueInputOption="RAW",
-        body={"values": [values]}
-    ).execute()
-    return result
-
-
-def read_sheet():
-    """
-    Lit toutes les lignes du Google Sheet
-    Retourne une liste de lignes
-    """
-    result = sheet.values().get(
-        spreadsheetId=SHEET_ID,
-        range="A:Z"
-    ).execute()
-
-    return result.get("values", [])
-
-
-# ---------------------------------------------------------------------
-# /submit — Sauvegarde du formulaire Shopify dans Google Sheets
-# ---------------------------------------------------------------------
+# --------------------------
+# 1️⃣ FORMULAIRE CLIENT
+# --------------------------
 @app.post("/submit")
 async def submit_form(data: dict):
-
-    # Harmonisation automatique des noms Shopify → Backend
-    statut = data.get("situation", data.get("statut_civil", ""))
-    revenu_annuel_brut = data.get("revenu_brut", data.get("revenu_annuel_brut", ""))
-    annees_cotisees = data.get("annees_avs", data.get("annees_cotisees", ""))
-    be = data.get("annees_be", data.get("be", ""))
-    ba = data.get("annees_ba", data.get("ba", ""))
-
     row = [
         data.get("prenom", ""),
         data.get("nom", ""),
         data.get("email", ""),
         data.get("telephone", ""),
-        statut,
+        data.get("situation", ""),
         data.get("age_actuel", ""),
         data.get("age_retraite", ""),
         data.get("salaire_annuel", ""),
-        revenu_annuel_brut,
+        data.get("revenu_brut", ""),
         data.get("salaire_moyen_avs", ""),
-        annees_cotisees,
-        be,
-        ba,
+        data.get("annees_avs", ""),
+        data.get("annees_be", ""),
+        data.get("annees_ba", ""),
         data.get("capital_lpp", ""),
         data.get("rente_conjoint", ""),
         data.get("annees_suisse", ""),
         data.get("canton", ""),
         data.get("souhaits", "")
     ]
+    sheet.append_row(row)
 
-    append_to_sheet(row)
+    form_data.append(data)
+    form_status.append("pending")
 
-    # Shopify adore recevoir success:true
     return {"success": True, "message": "Données enregistrées"}
 
 
-# ---------------------------------------------------------------------
-# /list — Liste les entrées pour la page admin Shopify
-# ---------------------------------------------------------------------
-
+# --------------------------
+# 2️⃣ LISTE DES FORMULAIRES
+# --------------------------
 @app.get("/list")
-def list_entries():
-    rows = read_sheet()
-    return {"rows": rows}
+def listing():
+    return {"rows": sheet.get_all_values()}
 
 
-# ---------------------------------------------------------------------
-# /calcul/{row} — Lance le simulateur AVS + LPP
-# ---------------------------------------------------------------------
+# --------------------------
+# 3️⃣ CALCUL (faux pour l'instant)
+# --------------------------
+@app.get("/calcul/{index}")
+def calcul(index: int):
+    if index >= len(form_data):
+        return {"error": "Index invalide"}
 
-@app.get("/calcul/{row_index}")
-def calcul(row_index: int):
-    rows = read_sheet()
+    d = form_data[index]
 
-    if row_index >= len(rows):
-        raise HTTPException(404, "Index hors limite")
-
-    row = rows[row_index]
-
-    # On mappe chaque colonne → variable pour le simulateur
-    data = {
-        "prenom": row[0],
-        "nom": row[1],
-        "email": row[2],
-        "telephone": row[3],
-        "statut_civil": row[4],
-        "age_actuel": row[5],
-        "age_retraite": row[6],
-        "salaire_annuel": row[7],
-        "revenu_annuel_brut": row[8],
-        "salaire_moyen_avs": row[9],
-        "annees_cotisees": row[10],
-        "be": row[11],
-        "ba": row[12],
-        "capital_lpp": row[13],
-        "rente_conjoint": row[14],
-        "annees_suisse": row[15],
-        "canton": row[16],
-        "souhaits": row[17],
-    }
-
-    resultat = simuler_pilier_complet(data)
-
+    # Exemple temporaire
     return {
-        "status": "ok",
-        "resultat": resultat
+        "prenom": d["prenom"],
+        "nom": d["nom"],
+        "rente_avs": 1800,
+        "rente_lpp": 1200,
+        "rente_totale": 3000
     }
 
 
-# ---------------------------------------------------------------------
-# /envoyer-mail/{row} — Envoie un email pro avec la simulation
-# ---------------------------------------------------------------------
+# --------------------------
+# 4️⃣ ENVOI D’EMAIL
+# --------------------------
+def envoyer_email(prenom, destinataire, texte):
+    SMTP_SERVER = "smtp.gmail.com"
+    SMTP_PORT = 587
+    SMTP_USER = "theo.maretraitesuisse@gmail.com"
+    SMTP_PASS = "gkta owql oiou bbac"
 
-SMTP_HOST = os.getenv("SMTP_HOST")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
-
-
-@app.post("/envoyer-mail/{row_index}")
-def envoyer_mail(row_index: int):
-    rows = read_sheet()
-
-    if row_index >= len(rows):
-        raise HTTPException(404, "Index hors limite")
-
-    row = rows[row_index]
-
-    data = {
-        "prenom": row[0],
-        "nom": row[1],
-        "email": row[2],
-        "telephone": row[3],
-        "statut_civil": row[4],
-        "age_actuel": row[5],
-        "age_retraite": row[6],
-        "salaire_annuel": row[7],
-        "revenu_annuel_brut": row[8],
-        "salaire_moyen_avs": row[9],
-        "annees_cotisees": row[10],
-        "be": row[11],
-        "ba": row[12],
-        "capital_lpp": row[13],
-        "rente_conjoint": row[14],
-        "annees_suisse": row[15],
-        "canton": row[16],
-        "souhaits": row[17],
-    }
-
-    result = simuler_pilier_complet(data)
-
-    # Construction du mail
     msg = MIMEMultipart()
     msg["From"] = SMTP_USER
-    msg["To"] = data["email"]
-    msg["Subject"] = "Votre simulation de retraite"
+    msg["To"] = destinataire
+    msg["Subject"] = f"Votre simulation retraite, {prenom}"
+    msg.attach(MIMEText(texte, "plain"))
 
-    body = result["details"]
-    msg.attach(MIMEText(body, "plain"))
-
-    # Envoi
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-    return {"status": "ok", "message": "Email envoyé"}
+
+@app.post("/envoyer-mail/{index}")
+def envoyer(index: int):
+    if index >= len(form_data):
+        return {"error": "index invalide"}
+
+    d = form_data[index]
+    texte = f"Votre estimation : AVS 1800, LPP 1200, Total 3000 CHF/mois."
+
+    envoyer_email(d["prenom"], d["email"], texte)
+    form_status[index] = "sent"
+
+    return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------
-# TEST EMAIL
-# ---------------------------------------------------------------------
+# --------------------------
+# 5️⃣ ADMIN — LOGIN → TOKEN
+# --------------------------
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 
-@app.get("/test-email")
-def test_email():
-    return {
-        "host": SMTP_HOST,
-        "user": SMTP_USER,
-        "port": SMTP_PORT
-    }
+
+@app.get("/admin-login")
+def admin_login(password: str):
+    if password != ADMIN_PASSWORD:
+        return {"success": False, "error": "Mot de passe incorrect"}
+
+    token = str(uuid.uuid4())
+    expiration = time.time() + 600  # 10 minutes
+
+    admin_tokens[token] = expiration
+    return {"success": True, "token": token}
+
+
+# --------------------------
+# 6️⃣ ADMIN — VALIDATION DU TOKEN
+# --------------------------
+@app.get("/verify-admin-token")
+def verify_token(token: str):
+    if token not in admin_tokens:
+        return {"allowed": False}
+
+    if time.time() > admin_tokens[token]:
+        del admin_tokens[token]
+        return {"allowed": False}
+
+    return {"allowed": True}
