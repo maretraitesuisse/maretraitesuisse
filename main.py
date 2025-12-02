@@ -1,20 +1,26 @@
+print("=== BACKEND CHARGÉ ===")
+
 import os
 import json
 import gspread
 import uuid
 import time
 import smtplib
+import unicodedata
+import re
+from fpdf import FPDF
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from google.oauth2.service_account import Credentials
 
 app = FastAPI()
 
-# --------------------------
+# ============================
 # CORS
-# --------------------------
+# ============================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,13 +28,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --------------------------
+# ============================
 # GOOGLE SHEETS
-# --------------------------
+# ============================
 creds_json = os.getenv("GOOGLE_SHEET_CREDENTIALS")
-
 if not creds_json:
-    raise Exception("⚠ GOOGLE_SHEET_CREDENTIALS est manquant dans Render")
+    raise Exception("⚠ GOOGLE_SHEET_CREDENTIALS manquant dans Render")
 
 creds_info = json.loads(creds_json)
 
@@ -42,24 +47,25 @@ client = gspread.authorize(creds)
 sheet_name = os.getenv("SHEET_NAME", "reponses_clients")
 sheet = client.open(sheet_name).sheet1
 
-# --------------------------
-# MÉMOIRE INTERNE
-# --------------------------
-form_data = []       # cache local pour calcul
-form_status = []     # envoyé / pending
-admin_tokens = {}    # token temporaire admin
 
+# ============================
+# MÉMOIRE INTERNE
+# ============================
+form_data = []
+form_status = []
+admin_tokens = {}
 
 @app.get("/ping")
 def ping():
     return {"status": "alive"}
 
 
-# --------------------------
-# SUBMIT
-# --------------------------
+# ============================
+# SUBMIT FORM
+# ============================
 @app.post("/submit")
 async def submit_form(data: dict):
+
     row = [
         data.get("prenom", ""),
         data.get("nom", ""),
@@ -86,41 +92,93 @@ async def submit_form(data: dict):
     form_data.append(data)
     form_status.append("pending")
 
-    return {"success": True, "message": "Données enregistrées"}
+    return {"success": True}
 
 
-# --------------------------
+# ============================
 # ADMIN LIST
-# --------------------------
+# ============================
 @app.get("/list")
 def listing():
     return {"rows": sheet.get_all_values()}
 
 
-# --------------------------
-# CALCUL
-# --------------------------
-@app.get("/calcul/{index}")
-def calcul(index: int):
-    if index >= len(form_data):
-        return {"error": "Index invalide"}
+# ============================
+# UTIL : nettoyeur UTF-8
+# ============================
+def clean(s: str):
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^ -~]", "", s)
+    return s.strip().lower()
 
-    d = form_data[index]
 
-    # résultat temporaire
+# ============================
+# TROUVER INDEX PAR EMAIL
+# ============================
+def index_from_email(email: str):
+    email_clean = clean(email)
+    rows = sheet.get_all_values()
+
+    for i in range(1, len(rows)):
+        if len(rows[i]) < 3:
+            continue
+
+        email_sheet = clean(rows[i][2])
+        if email_clean == email_sheet:
+            return i
+
+    return -1
+
+
+# ============================
+# CALCUL PAR EMAIL
+# ============================
+@app.get("/calcul-email")
+def calcul_email(email: str):
+    idx = index_from_email(email)
+    if idx == -1:
+        return {"error": "email introuvable"}
+
+    row = sheet.get_all_values()[idx]
+
+    # ICI tu peux brancher ton vrai calcul Python
+    # Pour l'instant version simple :
     return {
-        "prenom": d.get("prenom", ""),
-        "nom": d.get("nom", ""),
+        "prenom": row[0],
+        "nom": row[1],
+        "email": row[2],
         "rente_avs": 1800,
         "rente_lpp": 1200,
         "rente_totale": 3000
     }
 
 
-# --------------------------
-# ENVOI MAIL
-# --------------------------
-def envoyer_email(prenom, destinataire, texte):
+# ============================
+# GÉNÉRATION PDF
+# ============================
+def make_pdf(data: dict, filepath: str):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "", 14)
+
+    pdf.cell(0, 10, "Estimation Retraite - S-Heat / MaRetraiteSuisse", ln=1)
+    pdf.ln(5)
+
+    pdf.set_font("Arial", "", 12)
+    for k, v in data.items():
+        pdf.cell(0, 8, f"{k} : {v}", ln=1)
+
+    pdf.output(filepath)
+
+
+# ============================
+# ENVOI EMAIL AVEC PDF
+# ============================
+def envoyer_email_pdf(prenom, email, pdf_path):
+
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
     SMTP_USER = "theo.maretraitesuisse@gmail.com"
@@ -128,9 +186,15 @@ def envoyer_email(prenom, destinataire, texte):
 
     msg = MIMEMultipart()
     msg["From"] = SMTP_USER
-    msg["To"] = destinataire
-    msg["Subject"] = f"Votre simulation retraite, {prenom}"
-    msg.attach(MIMEText(texte, "plain"))
+    msg["To"] = email
+    msg["Subject"] = f"Votre estimation retraite, {prenom}"
+
+    msg.attach(MIMEText("Veuillez trouver ci-joint votre estimation retraite en PDF.", "plain"))
+
+    with open(pdf_path, "rb") as f:
+        part = MIMEApplication(f.read(), Name="estimation.pdf")
+        part["Content-Disposition"] = 'attachment; filename="estimation.pdf"'
+        msg.attach(part)
 
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.starttls()
@@ -138,25 +202,39 @@ def envoyer_email(prenom, destinataire, texte):
         server.send_message(msg)
 
 
-@app.post("/envoyer-mail/{index}")
-def envoyer(index: int):
-    if index >= len(form_data):
-        return {"error": "index invalide"}
+# ============================
+# API : créer PDF + envoyer mail
+# ============================
+@app.post("/generer-pdf-email")
+def generer_pdf_email(email: str):
 
-    d = form_data[index]
-    texte = f"Votre estimation : AVS 1800, LPP 1200, Total 3000 CHF/mois."
+    idx = index_from_email(email)
+    if idx == -1:
+        return {"success": False, "error": "email introuvable"}
 
-    envoyer_email(d["prenom"], d["email"], texte)
-    form_status[index] = "sent"
+    row = sheet.get_all_values()[idx]
 
-    return {"status": "ok"}
+    data = {
+        "Prenom": row[0],
+        "Nom": row[1],
+        "Email": row[2],
+        "Rente AVS": "1800 CHF / mois",
+        "Rente LPP": "1200 CHF / mois",
+        "Total": "3000 CHF / mois"
+    }
+
+    pdf_path = "/tmp/estimation.pdf"
+    make_pdf(data, pdf_path)
+
+    envoyer_email_pdf(row[0], row[2], pdf_path)
+
+    return {"success": True}
 
 
-# --------------------------
+# ============================
 # ADMIN LOGIN
-# --------------------------
+# ============================
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
-
 
 @app.get("/admin-login")
 def admin_login(password: str):
@@ -165,8 +243,8 @@ def admin_login(password: str):
 
     token = str(uuid.uuid4())
     expiration = time.time() + 600
-
     admin_tokens[token] = expiration
+
     return {"success": True, "token": token}
 
 
@@ -180,3 +258,6 @@ def verify_token(token: str):
         return {"allowed": False}
 
     return {"allowed": True}
+
+
+
