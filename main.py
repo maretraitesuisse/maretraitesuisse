@@ -313,7 +313,7 @@ def admin_login(password: str):
 @app.get("/verify-admin-token")
 def verify_token(token: str):
     if token not in admin_tokens:
-        return {"allowed": False"}
+        return {"allowed": False}
     if time.time() > admin_tokens[token]:
         del admin_tokens[token]
         return {"allowed": False}
