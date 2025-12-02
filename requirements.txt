@@ -9,5 +9,5 @@ gspread
 oauth2client
 uvicorn
 requests
-
+fpdf2
 
