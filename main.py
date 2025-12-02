@@ -4,6 +4,8 @@ import gspread
 import uuid
 import time
 import smtplib
+import unicodedata
+import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from email.mime.text import MIMEText
@@ -251,8 +253,7 @@ def calcul_email(email: str):
 
 
 
-import unicodedata
-import re
+
 
 def clean(s: str):
     if not s:
