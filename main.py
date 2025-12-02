@@ -180,3 +180,85 @@ def verify_token(token: str):
         return {"allowed": False}
 
     return {"allowed": True}
+
+# ==========================================================
+# TROUVER INDEX PAR EMAIL DANS GOOGLE SHEET
+# ==========================================================
+def index_from_email(email: str):
+    rows = sheet.get_all_values()  # liste complète
+    for i in range(1, len(rows)):  # i=1 pour ignorer en-tête
+        if rows[i][2].strip().lower() == email.strip().lower():
+            return i
+    return -1
+
+
+# ==========================================================
+# CALCUL BASÉ SUR EMAIL
+# ==========================================================
+@app.get("/calcul-email")
+def calcul_email(email: str):
+    idx = index_from_email(email)
+    if idx == -1:
+        return {"error": "Email introuvable dans Google Sheet"}
+
+    # Récupération ligne brute
+    row = sheet.row_values(idx)
+
+    # Extraction des données (selon ordre dans /submit)
+    d = {
+        "prenom": row[0],
+        "nom": row[1],
+        "email": row[2],
+        "telephone": row[3],
+        "situation": row[4],
+        "age_actuel": row[5],
+        "age_retraite": row[6],
+        "salaire_annuel": row[7],
+        "revenu_brut": row[8],
+        "salaire_moyen_avs": row[9],
+        "annees_avs": row[10],
+        "annees_be": row[11],
+        "annees_ba": row[12],
+        "capital_lpp": row[13],
+        "rente_conjoint": row[14],
+        "annees_suisse": row[15],
+        "canton": row[16],
+        "souhaits": row[17],
+    }
+
+    # -----------------------------
+    # TON CALCUL RETRAITE ICI
+    # (exemple temporaire)
+    # -----------------------------
+    rente_avs = 1800
+    rente_lpp = 1200
+    rente_totale = rente_avs + rente_lpp
+
+    return {
+        "prenom": d["prenom"],
+        "nom": d["nom"],
+        "email": d["email"],
+        "rente_avs": rente_avs,
+        "rente_lpp": rente_lpp,
+        "rente_totale": rente_totale
+    }
+
+
+# ==========================================================
+# ENVOI DU MAIL BASÉ SUR L'EMAIL
+# ==========================================================
+@app.post("/envoyer-mail-email")
+def envoyer_mail_email(email: str):
+    idx = index_from_email(email)
+    if idx == -1:
+        return {"error": "Email introuvable dans Google Sheet"}
+
+    row = sheet.row_values(idx)
+    prenom = row[0]
+    destinataire = row[2]
+
+    texte = f"Votre estimation : AVS 1800, LPP 1200, Total 3000 CHF/mois."
+
+    envoyer_email(prenom, destinataire, texte)
+
+    return {"success": True}
