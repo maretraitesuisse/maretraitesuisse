@@ -202,51 +202,29 @@ def index_from_email(email: str):
 # ==========================================================
 @app.get("/calcul-email")
 def calcul_email(email: str):
+    print("=== ROUTE CALCUL-EMAIL APPELÉE ===")
+    print("EMAIL RECU:", email)
+
+    rows = sheet.get_all_values()
+    print("NB LIGNES SHEET:", len(rows))
+
     idx = index_from_email(email)
+    print("INDEX TROUVÉ:", idx)
+
     if idx == -1:
-        return {"error": "Email introuvable dans Google Sheet"}
+        return {"error": "email introuvable", "email": email}
 
-    # Récupération ligne brute
-    row = sheet.row_values(idx)
+    row = rows[idx]
 
-    # Extraction des données (selon ordre dans /submit)
-    d = {
+    return {
         "prenom": row[0],
         "nom": row[1],
         "email": row[2],
-        "telephone": row[3],
-        "situation": row[4],
-        "age_actuel": row[5],
-        "age_retraite": row[6],
-        "salaire_annuel": row[7],
-        "revenu_brut": row[8],
-        "salaire_moyen_avs": row[9],
-        "annees_avs": row[10],
-        "annees_be": row[11],
-        "annees_ba": row[12],
-        "capital_lpp": row[13],
-        "rente_conjoint": row[14],
-        "annees_suisse": row[15],
-        "canton": row[16],
-        "souhaits": row[17],
+        "rente_avs": 1800,
+        "rente_lpp": 1200,
+        "rente_totale": 3000
     }
 
-    # -----------------------------
-    # TON CALCUL RETRAITE ICI
-    # (exemple temporaire)
-    # -----------------------------
-    rente_avs = 1800
-    rente_lpp = 1200
-    rente_totale = rente_avs + rente_lpp
-
-    return {
-        "prenom": d["prenom"],
-        "nom": d["nom"],
-        "email": d["email"],
-        "rente_avs": rente_avs,
-        "rente_lpp": rente_lpp,
-        "rente_totale": rente_totale
-    }
 
 
 # ==========================================================
