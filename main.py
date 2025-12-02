@@ -248,17 +248,23 @@ def calcul_email(email: str):
 # ENVOI DU MAIL BASÉ SUR L'EMAIL
 # ==========================================================
 @app.post("/envoyer-mail-email")
-def envoyer_mail_email(email: str):
-    idx = index_from_email(email)
-    if idx == -1:
-        return {"error": "Email introuvable dans Google Sheet"}
 
-    row = sheet.row_values(idx)
-    prenom = row[0]
-    destinataire = row[2]
+def index_from_email(email: str):
+    email_clean = email.strip().lower()
 
-    texte = f"Votre estimation : AVS 1800, LPP 1200, Total 3000 CHF/mois."
+    rows = sheet.get_all_values()
 
-    envoyer_email(prenom, destinataire, texte)
+    for i in range(1, len(rows)):  # i=1 pour ignorer l'en-tête
+        if len(rows[i]) < 3:
+            continue
 
-    return {"success": True}
+        email_sheet = rows[i][2].strip().lower()
+
+        # On ignore tous les caractères invisibles
+        email_sheet = "".join(c for c in email_sheet if c.isprintable())
+        email_clean2 = "".join(c for c in email_clean if c.isprintable())
+
+        if email_sheet == email_clean2:
+            return i
+
+    return -1
