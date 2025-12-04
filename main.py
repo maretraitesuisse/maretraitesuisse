@@ -74,6 +74,40 @@ def listing():
     return {"rows": sheet.get_all_values()}
 
 
+
+# =========================================================
+#        ROUTE : réception formulaire → Google Sheet
+# =========================================================
+@app.post("/submit")
+def submit(data: dict):
+    # Génération d'une ligne pour Google Sheet
+    row = [
+        data.get("prenom", ""),
+        data.get("nom", ""),
+        data.get("email", ""),
+        data.get("telephone", ""),
+        data.get("statut_civil", ""),
+        data.get("age_actuel", ""),
+        data.get("age_retraite", ""),
+        data.get("salaire_annuel", ""),
+        data.get("revenu_brut", ""),
+        data.get("salaire_moyen_avs", ""),
+        data.get("annees_avs", ""),
+        data.get("annees_be", ""),
+        data.get("annees_ba", ""),
+        data.get("capital_lpp", ""),
+        data.get("rente_conjoint", ""),
+        data.get("annees_suisse", ""),
+        data.get("canton", ""),
+        data.get("souhaits", ""),
+    ]
+
+    sheet.append_row(row)
+
+    return {"success": True, "message": "Formulaire enregistré."}
+
+
+
 # =========================================================
 #   ROUTE CALCUL PAR EMAIL → CALCUL COMPLET AVS + LPP
 # =========================================================
