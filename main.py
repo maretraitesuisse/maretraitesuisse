@@ -4,11 +4,10 @@ import os
 import json
 import time
 import uuid
-import smtplib
+import requests
+import base64
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from google.oauth2.service_account import Credentials
 import gspread
 
@@ -59,7 +58,7 @@ def find_index_by_email(email: str):
     rows = sheet.get_all_values()
     email = email.strip().lower()
 
-    for i in range(1, len(rows)):  # commencer après l’en-tête
+    for i in range(1, len(rows)):  # ignorer l'entête
         if rows[i][2].strip().lower() == email:
             return i
 
@@ -67,20 +66,11 @@ def find_index_by_email(email: str):
 
 
 # =========================================================
-#                    ROUTE : LIST
-# =========================================================
-@app.get("/list")
-def listing():
-    return {"rows": sheet.get_all_values()}
-
-
-
-# =========================================================
 #        ROUTE : réception formulaire → Google Sheet
 # =========================================================
 @app.post("/submit")
 def submit(data: dict):
-    # Génération d'une ligne pour Google Sheet
+
     row = [
         data.get("prenom", ""),
         data.get("nom", ""),
@@ -103,9 +93,15 @@ def submit(data: dict):
     ]
 
     sheet.append_row(row)
-
     return {"success": True, "message": "Formulaire enregistré."}
 
+
+# =========================================================
+#                    ROUTE : LIST
+# =========================================================
+@app.get("/list")
+def listing():
+    return {"rows": sheet.get_all_values()}
 
 
 # =========================================================
@@ -119,7 +115,6 @@ def calcul_email(email: str):
 
     row = sheet.get_all_values()[index]
 
-    # On mappe les colonnes Google Sheet → variables Python
     donnees = {
         "prenom": row[0],
         "nom": row[1],
@@ -142,53 +137,52 @@ def calcul_email(email: str):
     }
 
     resultat = calcul_complet_retraite(donnees)
-
     return resultat
 
 
 # =========================================================
-#     SMTP — envoyer email avec le PDF en pièce jointe
+#       ENVOI EMAIL VIA BREVO (Sendinblue)
 # =========================================================
 def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
 
-    SMTP_SERVER = "smtp.gmail.com"
-    SMTP_PORT = 587
-    SMTP_USER = "theo.maretraitesuisse@gmail.com"
-    SMTP_PASS = "gkta owql oiou bbac"
+    API_KEY = os.getenv("BREVO_API_KEY")
+    if not API_KEY:
+        raise Exception("BREVO_API_KEY manquant dans Render !")
 
-    msg = MIMEMultipart()
-    msg["From"] = SMTP_USER
-    msg["To"] = destinataire
-    msg["Subject"] = f"Votre estimation retraite – {prenom}"
-
-    corps = (
-        f"Bonjour {prenom},\n\n"
-        "Veuillez trouver ci-joint votre analyse retraite complète.\n"
-        "N'hésitez pas à répondre à cet email pour toute question.\n\n"
-        "Bien cordialement,\n"
-        "Ma Retraite Suisse\n"
-        "Service d’analyse retraite\n"
-        "theo.maretraitesuisse@gmail.com"
-    )
-
-    msg.attach(MIMEText(corps, "plain"))
-
-    # Charger le fichier PDF
+    # Charger PDF en base64
     with open(pdf_path, "rb") as f:
-        from email.mime.application import MIMEApplication
-        part = MIMEApplication(f.read(), _subtype="pdf")
-        part.add_header("Content-Disposition", "attachment", filename="estimation_retraite.pdf")
-        msg.attach(part)
+        pdf_data = base64.b64encode(f.read()).decode()
 
-    # Envoi SMTP
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.send_message(msg)
+    url = "https://api.brevo.com/v3/smtp/email"
+
+    payload = {
+        "sender": {"email": "theo.maretraitesuisse@gmail.com"},
+        "to": [{"email": destinataire}],
+        "subject": f"Votre estimation retraite – {prenom}",
+        "htmlContent": f"""
+            <p>Bonjour {prenom},</p>
+            <p>Veuillez trouver ci-joint votre analyse retraite complète.</p>
+            <p>Bien cordialement,<br>Ma Retraite Suisse</p>
+        """,
+        "attachment": [
+            {
+                "name": "estimation_retraite.pdf",
+                "content": pdf_data
+            }
+        ]
+    }
+
+    headers = {
+        "accept": "application/json",
+        "api-key": API_KEY,
+        "content-type": "application/json"
+    }
+
+    requests.post(url, json=payload, headers=headers)
 
 
 # =========================================================
-#     ROUTE : générer + envoyer PDF
+#     ROUTE : générer PDF + envoyer par email
 # =========================================================
 @app.post("/envoyer-mail-email")
 def envoyer_pdf(email: str):
@@ -220,7 +214,6 @@ def envoyer_pdf(email: str):
     }
 
     resultat = calcul_complet_retraite(donnees)
-
     pdf_path = generer_pdf_estimation(donnees, resultat)
 
     envoyer_email_avec_pdf(
@@ -233,7 +226,7 @@ def envoyer_pdf(email: str):
 
 
 # =========================================================
-#     ADMIN LOGIN (Render token)
+#                ADMIN LOGIN (Render token)
 # =========================================================
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens = {}
@@ -246,8 +239,8 @@ def admin_login(password: str):
 
     token = str(uuid.uuid4())
     expiration = time.time() + 600
-
     admin_tokens[token] = expiration
+
     return {"success": True, "token": token}
 
 
@@ -263,6 +256,9 @@ def verify_token(token: str):
     return {"allowed": True}
 
 
+# =========================================================
+#                        PING
+# =========================================================
 @app.get("/ping")
 def ping():
     return {"status": "alive"}
