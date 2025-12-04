@@ -1,140 +1,72 @@
-# ================================================================
-#      PDF GENERATOR – STYLE PREMIUM ROUGE & GRIS
-# ================================================================
-# Produit un PDF multi-pages à partir des résultats du calcul :
-# - Page 1 : Résumé visuel + identité client
-# - Page 2 : Détails AVS
-# - Page 3 : Détails LPP
-# - Page 4 : Diagnostic ton B + contact
-# ================================================================
+# pdf_generator.py
+# ===============================================================
+# Génération du PDF estimation retraite complète AVS + LPP
+# ===============================================================
 
-from fpdf import FPDF
-import os
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from datetime import datetime
 
+def generer_pdf_estimation(donnees, resultat, output_path="estimation_retraite.pdf"):
+    """
+    Génère le PDF complet : AVS + LPP + total
+    """
 
-class PDFRetraite(FPDF):
-    def header(self):
-        # Bandeau rouge
-        self.set_fill_color(180, 0, 0)
-        self.rect(0, 0, 210, 22, 'F')
+    pdf = canvas.Canvas(output_path, pagesize=A4)
+    largeur, hauteur = A4
 
-        # Logo (à déposer dans /static/logo.png)
-        logo_path = "logo.png"
-        if os.path.exists(logo_path):
-            self.image(logo_path, 10, 4, 22)
+    # ------------------------------------------------------------
+    # TITRE
+    # ------------------------------------------------------------
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.drawString(50, hauteur - 60, "Estimation retraite complète")
 
-        # Titre
-        self.set_xy(40, 6)
-        self.set_text_color(255, 255, 255)
-        self.set_font("Helvetica", "B", 16)
-        self.cell(0, 10, "Ma Retraite Suisse – Rapport Officiel", border=0, ln=1)
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(50, hauteur - 85, f"Émis le : {datetime.now().strftime('%d.%m.%Y')}")
 
-        # Ligne rouge/grise
-        self.set_draw_color(180, 0, 0)
-        self.set_line_width(0.7)
-        self.line(10, 22, 200, 22)
+    # ------------------------------------------------------------
+    # IDENTITÉ
+    # ------------------------------------------------------------
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(50, hauteur - 140, "Informations personnelles")
 
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(120)
-        self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(60, hauteur - 165, f"Nom : {donnees['nom']}")
+    pdf.drawString(60, hauteur - 185, f"Prénom : {donnees['prenom']}")
+    pdf.drawString(60, hauteur - 205, f"Âge actuel : {donnees['age_actuel']} ans")
+    pdf.drawString(60, hauteur - 225, f"Âge de retraite : {donnees['age_retraite']} ans")
 
+    # ------------------------------------------------------------
+    # RÉSULTATS AVS
+    # ------------------------------------------------------------
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(50, hauteur - 270, "Rente AVS")
 
-def ligne_titre(pdf, titre):
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.set_text_color(180, 0, 0)
-    pdf.ln(8)
-    pdf.cell(0, 10, titre, ln=1)
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(60, hauteur - 295, f"Rente AVS mensuelle : CHF {resultat['rente_avs']:,}".replace(",", "'"))
 
+    # ------------------------------------------------------------
+    # RÉSULTATS LPP
+    # ------------------------------------------------------------
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(50, hauteur - 340, "Rente LPP")
 
-def ligne_valeur(pdf, label, valeur):
-    pdf.set_font("Helvetica", "", 12)
-    pdf.set_text_color(0)
-    pdf.multi_cell(0, 7, f"{label} : {valeur}")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(60, hauteur - 365, f"Rente LPP annuelle : CHF {resultat['rente_lpp']:,}".replace(",", "'"))
 
+    # ------------------------------------------------------------
+    # TOTAL
+    # ------------------------------------------------------------
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(50, hauteur - 410, "Total des rentes")
 
-# ---------------------------------------------------------------
-# FONCTION DE GÉNÉRATION DU PDF
-# ---------------------------------------------------------------
-def generer_pdf(data, filename="rapport_retraite.pdf"):
-    pdf = PDFRetraite()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.setFont("Helvetica", 12)
+    pdf.drawString(60, hauteur - 435, f"Total annuel : CHF {resultat['total_retraite']:,}".replace(",", "'"))
 
-    # ---------------------------------------------------------------
-    # PAGE 1 – Résumé
-    # ---------------------------------------------------------------
-    pdf.add_page()
+    # ------------------------------------------------------------
+    # FIN
+    # ------------------------------------------------------------
+    pdf.showPage()
+    pdf.save()
 
-    ligne_titre(pdf, "Résumé de votre prévoyance")
-    pdf.ln(4)
-
-    ligne_valeur(pdf, "Prénom", data["prenom"])
-    ligne_valeur(pdf, "Nom", data["nom"])
-    ligne_valeur(pdf, "Email", data["email"])
-
-    pdf.ln(4)
-    ligne_valeur(pdf, "Rente AVS estimée", f"{data['rente_avs']:,.2f} CHF / mois")
-    ligne_valeur(pdf, "Rente LPP estimée", f"{data['rente_lpp']:,.2f} CHF / mois")
-    ligne_valeur(pdf, "TOTAL AVS + LPP", f"{data['total_retraite']:,.2f} CHF / mois")
-
-    pdf.ln(5)
-    ligne_valeur(pdf, "RAMD estimé", f"{data['ramd']:,.2f} CHF")
-
-    # ---------------------------------------------------------------
-    # PAGE 2 – AVS
-    # ---------------------------------------------------------------
-    pdf.add_page()
-    ligne_titre(pdf, "Analyse AVS – 1er Pilier")
-    pdf.ln(4)
-
-    ligne_valeur(pdf, "Rente AVS finale", f"{data['rente_avs']:,.2f} CHF / mois")
-    ligne_valeur(pdf, "Bonifications (BE + BA)", "Automatiquement intégrées")
-    ligne_valeur(pdf, "RAMD", f"{data['ramd']:,.2f} CHF")
-
-    if data["rente_conjoint"] > 0:
-        ligne_valeur(pdf, "Rente AVS conjoint (après plafonnement éventuel)",
-                     f"{data['rente_conjoint']:,.2f} CHF / mois")
-
-    # ---------------------------------------------------------------
-    # PAGE 3 – LPP
-    # ---------------------------------------------------------------
-    pdf.add_page()
-    ligne_titre(pdf, "Analyse LPP – 2e Pilier")
-
-    ligne_valeur(pdf, "Capital LPP initial",
-                 f"{data['capital_lpp_initial']:,.2f} CHF ({data['capital_lpp_source']})")
-
-    ligne_valeur(pdf, "Capital LPP projeté à la retraite",
-                 f"{data['capital_lpp_final']:,.2f} CHF")
-
-    ligne_valeur(pdf, "Rente LPP projetée",
-                 f"{data['rente_lpp']:,.2f} CHF / mois")
-
-    # ---------------------------------------------------------------
-    # PAGE 4 – Diagnostic
-    # ---------------------------------------------------------------
-    pdf.add_page()
-    ligne_titre(pdf, "Diagnostic général – Ton professionnel & chaleureux")
-
-    pdf.set_font("Helvetica", "", 12)
-    pdf.set_text_color(0)
-
-    for point in data["diagnostic"]:
-        pdf.multi_cell(0, 7, f"• {point}")
-        pdf.ln(2)
-
-    # BLOC CONTACT
-    pdf.ln(10)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.set_text_color(180, 0, 0)
-    pdf.cell(0, 10, "Pour toute question :", ln=1)
-
-    pdf.set_text_color(0)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, "Ma Retraite Suisse – Service Analyse", ln=1)
-    pdf.cell(0, 6, "Email : theo.maretraitesuisse@gmail.com", ln=1)
-
-    pdf.output(filename)
-
-    return filename
+    return output_path
