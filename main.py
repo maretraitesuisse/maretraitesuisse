@@ -30,7 +30,7 @@ app.add_middleware(
 
 
 # =========================================================
-#                CONNEXION GOOGLE SHEET
+#                GOOGLE SHEET
 # =========================================================
 creds_json = os.getenv("GOOGLE_SHEET_CREDENTIALS")
 if not creds_json:
@@ -52,13 +52,14 @@ sheet = client.open(sheet_name).sheet1
 
 
 # =========================================================
-#         FONCTION UTILITAIRE : TROUVER LIGNE EMAIL
+#   UTILITAIRE : TROUVE L'INDEX D'UN EMAIL DANS LA SHEET
 # =========================================================
 def find_index_by_email(email: str):
     rows = sheet.get_all_values()
     email = email.strip().lower()
 
-    for i in range(1, len(rows)):  # ignorer l'entête
+    # Ignorer la première ligne (header)
+    for i in range(1, len(rows)):
         if rows[i][2].strip().lower() == email:
             return i
 
@@ -66,7 +67,7 @@ def find_index_by_email(email: str):
 
 
 # =========================================================
-#        ROUTE : réception formulaire → Google Sheet
+#   ROUTE : RÉCEPTION FORMULAIRE → GOOGLE SHEET
 # =========================================================
 @app.post("/submit")
 def submit(data: dict):
@@ -89,29 +90,36 @@ def submit(data: dict):
         data.get("rente_conjoint", ""),
         data.get("annees_suisse", ""),
         data.get("canton", ""),
-        data.get("souhaits", ""),
+        data.get("souhaits", "")
     ]
 
     sheet.append_row(row)
+
     return {"success": True, "message": "Formulaire enregistré."}
 
 
 # =========================================================
-#                    ROUTE : LIST
+#   ROUTE : LIST (RENVOIE TOUTES LES RÉPONSES)
 # =========================================================
 @app.get("/list")
 def listing():
-    return {"rows": sheet.get_all_values()}
+    rows = sheet.get_all_values()
+
+    results = []
+    for i in range(1, len(rows)):  # ignorer header
+        results.append(rows[i])
+
+    return {"rows": results}
 
 
 # =========================================================
-#   ROUTE CALCUL PAR EMAIL → CALCUL COMPLET AVS + LPP
+#   ROUTE : CALCUL COMPLET RETRAITE → JSON
 # =========================================================
 @app.get("/calcul-email")
 def calcul_email(email: str):
     index = find_index_by_email(email)
     if index == -1:
-        return {"error": "email introuvable dans Google Sheet"}
+        return {"error": "email introuvable"}
 
     row = sheet.get_all_values()[index]
 
@@ -137,11 +145,12 @@ def calcul_email(email: str):
     }
 
     resultat = calcul_complet_retraite(donnees)
+
     return resultat
 
 
 # =========================================================
-#       ENVOI EMAIL VIA BREVO (Sendinblue)
+#   ENVOI EMAIL via BREVO
 # =========================================================
 def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
 
@@ -149,7 +158,6 @@ def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
     if not API_KEY:
         raise Exception("BREVO_API_KEY manquant dans Render !")
 
-    # Charger PDF en base64
     with open(pdf_path, "rb") as f:
         pdf_data = base64.b64encode(f.read()).decode()
 
@@ -159,8 +167,8 @@ def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
         "sender": {"email": "theo.maretraitesuisse@gmail.com"},
         "to": [{"email": destinataire}],
         "subject": f"Votre estimation retraite – {prenom}",
-        "htmlContent": f"""
-            <p>Bonjour {prenom},</p>
+        "htmlContent": """
+            <p>Bonjour,</p>
             <p>Veuillez trouver ci-joint votre analyse retraite complète.</p>
             <p>Bien cordialement,<br>Ma Retraite Suisse</p>
         """,
@@ -182,7 +190,7 @@ def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
 
 
 # =========================================================
-#     ROUTE : générer PDF + envoyer par email
+#   ROUTE : GÉNÉRER + ENVOYER PDF
 # =========================================================
 @app.post("/envoyer-mail-email")
 def envoyer_pdf(email: str):
@@ -226,7 +234,7 @@ def envoyer_pdf(email: str):
 
 
 # =========================================================
-#                ADMIN LOGIN (Render token)
+#   ADMIN TOKEN
 # =========================================================
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens = {}
@@ -238,8 +246,7 @@ def admin_login(password: str):
         return {"success": False}
 
     token = str(uuid.uuid4())
-    expiration = time.time() + 600
-    admin_tokens[token] = expiration
+    admin_tokens[token] = time.time() + 600
 
     return {"success": True, "token": token}
 
@@ -257,7 +264,7 @@ def verify_token(token: str):
 
 
 # =========================================================
-#                        PING
+#   PING
 # =========================================================
 @app.get("/ping")
 def ping():
