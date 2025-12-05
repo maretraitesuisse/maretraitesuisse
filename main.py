@@ -6,6 +6,7 @@ import time
 import uuid
 import requests
 import base64
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from google.oauth2.service_account import Credentials
@@ -52,17 +53,15 @@ sheet = client.open(sheet_name).sheet1
 
 
 # =========================================================
-#   UTILITAIRE : TROUVE L'INDEX D'UN EMAIL DANS LA SHEET
+#   UTILITAIRE : TROUVER L'INDEX D'UN EMAIL DANS LA SHEET
 # =========================================================
 def find_index_by_email(email: str):
     rows = sheet.get_all_values()
     email = email.strip().lower()
 
-    # Ignorer la première ligne (header)
-    for i in range(1, len(rows)):
+    for i in range(1, len(rows)):  # ignorer header
         if rows[i][2].strip().lower() == email:
-            return i
-
+            return i  # index de la ligne dans Google Sheet (0-based)
     return -1
 
 
@@ -90,7 +89,11 @@ def submit(data: dict):
         data.get("rente_conjoint", ""),
         data.get("annees_suisse", ""),
         data.get("canton", ""),
-        data.get("souhaits", "")
+        data.get("souhaits", ""),
+        
+        # === Colonnes ajoutées (PDF envoyé + date/heure) ===
+        "0",        # PDF envoyé ? (0 = non, 1 = oui)
+        ""          # date/heure envoi PDF
     ]
 
     sheet.append_row(row)
@@ -104,11 +107,7 @@ def submit(data: dict):
 @app.get("/list")
 def listing():
     rows = sheet.get_all_values()
-
-    results = []
-    for i in range(1, len(rows)):  # ignorer header
-        results.append(rows[i])
-
+    results = rows[1:]  # ignorer header
     return {"rows": results}
 
 
@@ -156,7 +155,7 @@ def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
 
     API_KEY = os.getenv("BREVO_API_KEY")
     if not API_KEY:
-        raise Exception("BREVO_API_KEY manquant dans Render !")
+        raise Exception("BREVO_API_KEY manquant !")
 
     with open(pdf_path, "rb") as f:
         pdf_data = base64.b64encode(f.read()).decode()
@@ -190,16 +189,17 @@ def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
 
 
 # =========================================================
-#   ROUTE : GÉNÉRER + ENVOYER PDF
+#   ROUTE : GÉNÉRER + ENVOYER PDF + METTRE À JOUR LA SHEET
 # =========================================================
 @app.post("/envoyer-mail-email")
 def envoyer_pdf(email: str):
     index = find_index_by_email(email)
     if index == -1:
-        return {"error": "email introuvable"}
+        return {"success": False, "error": "email introuvable"}
 
     row = sheet.get_all_values()[index]
 
+    # Données pour PDF
     donnees = {
         "prenom": row[0],
         "nom": row[1],
@@ -221,14 +221,20 @@ def envoyer_pdf(email: str):
         "souhaits": row[17]
     }
 
+    # Calcul + PDF
     resultat = calcul_complet_retraite(donnees)
     pdf_path = generer_pdf_estimation(donnees, resultat)
 
+    # Envoi email
     envoyer_email_avec_pdf(
         destinataire=donnees["email"],
         prenom=donnees["prenom"],
         pdf_path=pdf_path
     )
+
+    # === Mise à jour Google Sheet ===
+    sheet.update_cell(index + 1, 19, "1")  # PDF envoyé (colonne 18 → index 19)
+    sheet.update_cell(index + 1, 20, datetime.now().strftime("%d.%m.%Y - %H:%M"))
 
     return {"success": True, "message": "PDF envoyé au client."}
 
@@ -246,7 +252,7 @@ def admin_login(password: str):
         return {"success": False}
 
     token = str(uuid.uuid4())
-    admin_tokens[token] = time.time() + 600
+    admin_tokens[token] = time.time() + 600  # expire dans 10 minutes
 
     return {"success": True, "token": token}
 
