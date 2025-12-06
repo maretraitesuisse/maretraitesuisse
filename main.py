@@ -330,6 +330,15 @@ def verify_token(token: str):
 
     return {"allowed": True}
 
+@app.get("/list")
+def list_clients():
+    try:
+        with open("clients.json", "r") as f:
+            data = json.load(f)
+        return {"clients": data}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 # =========================================================
 #   PING
