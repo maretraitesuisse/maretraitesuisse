@@ -1,0 +1,15 @@
+name: Envoi Avis J+1
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # Tous les jours à 09:00
+  workflow_dispatch:      # Permet de tester manuellement
+
+jobs:
+  call-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /cron-avis
+        run: |
+          curl -X GET "https://maretraitesuisse.onrender.com/cron-avis"
+
