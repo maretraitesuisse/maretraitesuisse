@@ -6,7 +6,7 @@ import time
 import uuid
 import requests
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from google.oauth2.service_account import Credentials
@@ -15,7 +15,6 @@ import gspread
 # === MODULES INTERNES ===
 from simulateur_avs_lpp import calcul_complet_retraite
 from pdf_generator import generer_pdf_estimation
-
 
 # =========================================================
 #                FASTAPI + CORS
@@ -28,7 +27,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # =========================================================
 #                GOOGLE SHEET
@@ -51,7 +49,6 @@ client = gspread.authorize(creds)
 sheet_name = os.getenv("SHEET_NAME", "reponses_clients")
 sheet = client.open(sheet_name).sheet1
 
-
 # =========================================================
 #   UTILITAIRE : TROUVER L'INDEX D'UN EMAIL DANS LA SHEET
 # =========================================================
@@ -61,12 +58,90 @@ def find_index_by_email(email: str):
 
     for i in range(1, len(rows)):  # ignorer header
         if rows[i][2].strip().lower() == email:
-            return i  # index de la ligne dans Google Sheet (0-based)
+            return i
     return -1
-
-
 # =========================================================
-#   ROUTE : RÉCEPTION FORMULAIRE → GOOGLE SHEET
+#   ENVOIS EMAILS VIA BREVO — TEMPLATES
+# =========================================================
+
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+if not BREVO_API_KEY:
+    raise Exception("BREVO_API_KEY manquant !")
+
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+
+# --- EMAIL 1 : Confirmation ---
+def envoyer_email_confirmation(destinataire, prenom):
+    payload = {
+        "templateId": 1,  # TEMPLATE "MRS – Confirmation"
+        "to": [{"email": destinataire}],
+        "params": {"prenom": prenom},
+        "sender": {
+            "email": "noreply@maretraitesuisse.com",
+            "name": "Ma Retraite Suisse"
+        }
+    }
+
+    headers = {
+        "accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "content-type": "application/json"
+    }
+
+    requests.post(BREVO_URL, json=payload, headers=headers)
+
+
+# --- EMAIL 2 : Résultat + PDF ---
+def envoyer_email_resultat(destinataire, prenom, pdf_path):
+    with open(pdf_path, "rb") as f:
+        pdf_data = base64.b64encode(f.read()).decode()
+
+    payload = {
+        "templateId": 2,  # TEMPLATE "MRS – Résultat PDF"
+        "to": [{"email": destinataire}],
+        "params": {"prenom": prenom},
+        "attachment": [
+            {
+                "name": "estimation_retraite.pdf",
+                "content": pdf_data
+            }
+        ],
+        "sender": {
+            "email": "noreply@maretraitesuisse.com",
+            "name": "Ma Retraite Suisse"
+        }
+    }
+
+    headers = {
+        "accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "content-type": "application/json"
+    }
+
+    requests.post(BREVO_URL, json=payload, headers=headers)
+
+
+# --- EMAIL 3 : Avis J+1 ---
+def envoyer_email_avis(destinataire, prenom):
+    payload = {
+        "templateId": 3,  # TEMPLATE "MRS – Avis J+1"
+        "to": [{"email": destinataire}],
+        "params": {"prenom": prenom},
+        "sender": {
+            "email": "noreply@maretraitesuisse.com",
+            "name": "Ma Retraite Suisse"
+        }
+    }
+
+    headers = {
+        "accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "content-type": "application/json"
+    }
+
+    requests.post(BREVO_URL, json=payload, headers=headers)
+# =========================================================
+#   ROUTE : RÉCEPTION FORMULAIRE → GOOGLE SHEET + EMAIL CONFIRMATION
 # =========================================================
 @app.post("/submit")
 def submit(data: dict):
@@ -90,29 +165,26 @@ def submit(data: dict):
         data.get("annees_suisse", ""),
         data.get("canton", ""),
         data.get("souhaits", ""),
-        
-        # === Colonnes ajoutées (PDF envoyé + date/heure) ===
-        "0",        # PDF envoyé ? (0 = non, 1 = oui)
-        ""          # date/heure envoi PDF
+
+        "0",  # PDF envoyé
+        "",   # date envoi PDF
+        "0"   # Mail Avis envoyé
     ]
 
     sheet.append_row(row)
 
-    return {"success": True, "message": "Formulaire enregistré."}
+    # === Envoi Email 1 : CONFIRMATION ===
+    envoyer_email_confirmation(
+        destinataire=data.get("email"),
+        prenom=data.get("prenom")
+    )
 
+    return {"success": True, "message": "Formulaire enregistré & email confirmation envoyé."}
 
-# =========================================================
-#   ROUTE : LIST (RENVOIE TOUTES LES RÉPONSES)
-# =========================================================
-@app.get("/list")
-def listing():
-    rows = sheet.get_all_values()
-    results = rows[1:]  # ignorer header
-    return {"rows": results}
 
 
 # =========================================================
-#   ROUTE : CALCUL COMPLET RETRAITE → JSON
+#   ROUTE : CALCUL COMPLET RETRAITE → JSON (ADMIN)
 # =========================================================
 @app.get("/calcul-email")
 def calcul_email(email: str):
@@ -144,48 +216,8 @@ def calcul_email(email: str):
     }
 
     resultat = calcul_complet_retraite(donnees)
-
     return resultat
 
-
-# =========================================================
-#   ENVOI EMAIL via BREVO
-# =========================================================
-def envoyer_email_avec_pdf(destinataire, prenom, pdf_path):
-
-    API_KEY = os.getenv("BREVO_API_KEY")
-    if not API_KEY:
-        raise Exception("BREVO_API_KEY manquant !")
-
-    with open(pdf_path, "rb") as f:
-        pdf_data = base64.b64encode(f.read()).decode()
-
-    url = "https://api.brevo.com/v3/smtp/email"
-
-    payload = {
-        "sender": {"email": "theo.maretraitesuisse@gmail.com"},
-        "to": [{"email": destinataire}],
-        "subject": f"Votre estimation retraite – {prenom}",
-        "htmlContent": """
-            <p>Bonjour,</p>
-            <p>Veuillez trouver ci-joint votre analyse retraite complète.</p>
-            <p>Bien cordialement,<br>Ma Retraite Suisse</p>
-        """,
-        "attachment": [
-            {
-                "name": "estimation_retraite.pdf",
-                "content": pdf_data
-            }
-        ]
-    }
-
-    headers = {
-        "accept": "application/json",
-        "api-key": API_KEY,
-        "content-type": "application/json"
-    }
-
-    requests.post(url, json=payload, headers=headers)
 
 
 # =========================================================
@@ -225,18 +257,48 @@ def envoyer_pdf(email: str):
     resultat = calcul_complet_retraite(donnees)
     pdf_path = generer_pdf_estimation(donnees, resultat)
 
-    # Envoi email
-    envoyer_email_avec_pdf(
+    # === Envoi Email 2 : Résultat + PDF ===
+    envoyer_email_resultat(
         destinataire=donnees["email"],
         prenom=donnees["prenom"],
         pdf_path=pdf_path
     )
 
     # === Mise à jour Google Sheet ===
-    sheet.update_cell(index + 1, 19, "1")  # PDF envoyé (colonne 18 → index 19)
+    sheet.update_cell(index + 1, 19, "1")  # PDF envoyé
     sheet.update_cell(index + 1, 20, datetime.now().strftime("%d.%m.%Y - %H:%M"))
 
     return {"success": True, "message": "PDF envoyé au client."}
+# =========================================================
+#   ROUTE CRON : ENVOYER AVIS J+1 AUTOMATIQUEMENT
+# =========================================================
+@app.get("/cron-avis")
+def cron_avis():
+
+    rows = sheet.get_all_values()
+
+    # On commence à la ligne 1 (car ligne 0 = header)
+    for idx in range(1, len(rows)):
+        row = rows[idx]
+
+        pdf_envoye = row[18]           # "PDF envoyé" colonne 19
+        avis_envoye = row[20]          # "Mail Avis envoyé" colonne 21
+        email = row[2]
+        prenom = row[0]
+
+        # Conditions : PDF envoyé ET mail avis non envoyé
+        if pdf_envoye == "1" and avis_envoye == "0":
+
+            # Envoi email Avis
+            envoyer_email_avis(email, prenom)
+
+            # On marque "Avis envoyé = 1"
+            sheet.update_cell(idx + 1, 21, "1")
+
+            print(f"✔ Avis envoyé à : {email}")
+
+    return {"success": True, "message": "Cron Avis exécuté."}
+
 
 
 # =========================================================
