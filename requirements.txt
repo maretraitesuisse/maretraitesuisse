@@ -12,3 +12,4 @@ requests
 fpdf2
 python-multipart
 reportlab
+matplotlib
