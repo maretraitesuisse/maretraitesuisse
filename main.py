@@ -6,7 +6,7 @@ import time
 import uuid
 import requests
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from google.oauth2.service_account import Credentials
@@ -49,30 +49,29 @@ client = gspread.authorize(creds)
 sheet_name = os.getenv("SHEET_NAME", "reponses_clients")
 sheet = client.open(sheet_name).sheet1
 
+
 # =========================================================
-#   UTILITAIRE : TROUVER L'INDEX D'UN EMAIL DANS LA SHEET
+#   UTILITAIRE : TROUVER EMAIL
 # =========================================================
 def find_index_by_email(email: str):
     rows = sheet.get_all_values()
     email = email.strip().lower()
 
-    for i in range(1, len(rows)):  # ignorer header
+    for i in range(1, len(rows)):
         if rows[i][2].strip().lower() == email:
             return i
     return -1
 
 
 # =========================================================
-#   ENVOIS EMAILS VIA BREVO — TEMPLATES
+#   ENVOI EMAILS BREVO
 # =========================================================
-
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 if not BREVO_API_KEY:
     raise Exception("BREVO_API_KEY manquant !")
 
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
-# --- EMAIL 1 : Confirmation ---
 def envoyer_email_confirmation(destinataire, prenom):
     payload = {
         "templateId": 1,
@@ -80,17 +79,13 @@ def envoyer_email_confirmation(destinataire, prenom):
         "params": {"prenom": prenom},
         "sender": {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
     }
-
-    headers = {
+    requests.post(BREVO_URL, json=payload, headers={
         "accept": "application/json",
         "api-key": BREVO_API_KEY,
         "content-type": "application/json"
-    }
-
-    requests.post(BREVO_URL, json=payload, headers=headers)
+    })
 
 
-# --- EMAIL 2 : Résultat + PDF ---
 def envoyer_email_resultat(destinataire, prenom, pdf_path):
     with open(pdf_path, "rb") as f:
         pdf_data = base64.b64encode(f.read()).decode()
@@ -104,17 +99,13 @@ def envoyer_email_resultat(destinataire, prenom, pdf_path):
         ],
         "sender": {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
     }
-
-    headers = {
+    requests.post(BREVO_URL, json=payload, headers={
         "accept": "application/json",
         "api-key": BREVO_API_KEY,
         "content-type": "application/json"
-    }
-
-    requests.post(BREVO_URL, json=payload, headers=headers)
+    })
 
 
-# --- EMAIL 3 : Avis J+1 ---
 def envoyer_email_avis(destinataire, prenom):
     payload = {
         "templateId": 3,
@@ -122,19 +113,15 @@ def envoyer_email_avis(destinataire, prenom):
         "params": {"prenom": prenom},
         "sender": {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
     }
-
-    headers = {
+    requests.post(BREVO_URL, json=payload, headers={
         "accept": "application/json",
         "api-key": BREVO_API_KEY,
         "content-type": "application/json"
-    }
-
-    requests.post(BREVO_URL, json=payload, headers=headers)
-
+    })
 
 
 # =========================================================
-#   ROUTE : RÉCEPTION FORMULAIRE → GOOGLE SHEET + EMAIL CONFIRMATION
+#   ROUTE : FORMULAIRE → SHEET + MAIL CONFIRM
 # =========================================================
 @app.post("/submit")
 def submit(data: dict):
@@ -159,24 +146,20 @@ def submit(data: dict):
         data.get("canton", ""),
         data.get("souhaits", ""),
 
-        "0",  # PDF envoyé
-        "",   # date envoi PDF
-        "0"   # Mail Avis envoyé
+        "0",  
+        "",   
+        "0"  
     ]
 
     sheet.append_row(row)
 
-    envoyer_email_confirmation(
-        destinataire=data.get("email"),
-        prenom=data.get("prenom")
-    )
+    envoyer_email_confirmation(data.get("email"), data.get("prenom"))
 
-    return {"success": True, "message": "Formulaire enregistré & email confirmation envoyé."}
-
+    return {"success": True}
 
 
 # =========================================================
-#   ROUTE : CALCUL COMPLET RETRAITE → JSON (ADMIN)
+#   ROUTE : CALCUL
 # =========================================================
 @app.get("/calcul-email")
 def calcul_email(email: str):
@@ -207,19 +190,17 @@ def calcul_email(email: str):
         "souhaits": row[17]
     }
 
-    resultat = calcul_complet_retraite(donnees)
-    return resultat
-
+    return calcul_complet_retraite(donnees)
 
 
 # =========================================================
-#   ROUTE : GÉNÉRER + ENVOYER PDF + METTRE À JOUR LA SHEET
+#   ROUTE : ENVOI PDF
 # =========================================================
 @app.post("/envoyer-mail-email")
 def envoyer_pdf(email: str):
     index = find_index_by_email(email)
     if index == -1:
-        return {"success": False, "error": "email introuvable"}
+        return {"success": False}
 
     row = sheet.get_all_values()[index]
 
@@ -247,21 +228,16 @@ def envoyer_pdf(email: str):
     resultat = calcul_complet_retraite(donnees)
     pdf_path = generer_pdf_estimation(donnees, resultat)
 
-    envoyer_email_resultat(
-        destinataire=donnees["email"],
-        prenom=donnees["prenom"],
-        pdf_path=pdf_path
-    )
+    envoyer_email_resultat(donnees["email"], donnees["prenom"], pdf_path)
 
     sheet.update_cell(index + 1, 19, "1")
     sheet.update_cell(index + 1, 20, datetime.now().strftime("%d.%m.%Y - %H:%M"))
 
-    return {"success": True, "message": "PDF envoyé au client."}
-
+    return {"success": True}
 
 
 # =========================================================
-#   ROUTE CRON : ENVOYER AVIS J+1 AUTOMATIQUEMENT
+#   ROUTE CRON
 # =========================================================
 @app.get("/cron-avis")
 def cron_avis():
@@ -282,10 +258,7 @@ def cron_avis():
 
             sheet.update_cell(idx + 1, 21, "1")
 
-            print(f"✔ Avis envoyé à : {email}")
-
-    return {"success": True, "message": "Cron Avis exécuté."}
-
+    return {"success": True}
 
 
 # =========================================================
@@ -317,39 +290,16 @@ def verify_token(token: str):
     return {"allowed": True}
 
 
-
 # =========================================================
-#   🎯 ROUTE : LISTE CLIENTS (ADMIN) — VERSION FINALE
+#   ROUTE LIST — FORMAT rows POUR TON ADMIN
 # =========================================================
 @app.get("/list")
 def list_clients():
     try:
         rows = sheet.get_all_values()
-
-        rows = rows[1:]  # enlever header
-
-        clients = []
-        for row in rows:
-            if len(row) < 3:
-                continue
-
-            clients.append({
-                "prenom": row[0],
-                "nom": row[1],
-                "email": row[2],
-                "telephone": row[3],
-                "statut_civil": row[4],
-                "age_actuel": row[5],
-                "age_retraite": row[6],
-                "salaire_annuel": row[7],
-                "revenu_brut": row[8],
-            })
-
-        return {"clients": clients}
-
+        return {"rows": rows}
     except Exception as e:
         return {"error": str(e)}
-
 
 
 # =========================================================
