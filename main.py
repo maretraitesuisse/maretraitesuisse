@@ -60,6 +60,8 @@ def find_index_by_email(email: str):
         if rows[i][2].strip().lower() == email:
             return i
     return -1
+
+
 # =========================================================
 #   ENVOIS EMAILS VIA BREVO — TEMPLATES
 # =========================================================
@@ -73,13 +75,10 @@ BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 # --- EMAIL 1 : Confirmation ---
 def envoyer_email_confirmation(destinataire, prenom):
     payload = {
-        "templateId": 1,  # TEMPLATE "MRS – Confirmation"
+        "templateId": 1,
         "to": [{"email": destinataire}],
         "params": {"prenom": prenom},
-        "sender": {
-            "email": "noreply@maretraitesuisse.com",
-            "name": "Ma Retraite Suisse"
-        }
+        "sender": {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
     }
 
     headers = {
@@ -97,19 +96,13 @@ def envoyer_email_resultat(destinataire, prenom, pdf_path):
         pdf_data = base64.b64encode(f.read()).decode()
 
     payload = {
-        "templateId": 2,  # TEMPLATE "MRS – Résultat PDF"
+        "templateId": 2,
         "to": [{"email": destinataire}],
         "params": {"prenom": prenom},
         "attachment": [
-            {
-                "name": "estimation_retraite.pdf",
-                "content": pdf_data
-            }
+            {"name": "estimation_retraite.pdf", "content": pdf_data}
         ],
-        "sender": {
-            "email": "noreply@maretraitesuisse.com",
-            "name": "Ma Retraite Suisse"
-        }
+        "sender": {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
     }
 
     headers = {
@@ -124,13 +117,10 @@ def envoyer_email_resultat(destinataire, prenom, pdf_path):
 # --- EMAIL 3 : Avis J+1 ---
 def envoyer_email_avis(destinataire, prenom):
     payload = {
-        "templateId": 3,  # TEMPLATE "MRS – Avis J+1"
+        "templateId": 3,
         "to": [{"email": destinataire}],
         "params": {"prenom": prenom},
-        "sender": {
-            "email": "noreply@maretraitesuisse.com",
-            "name": "Ma Retraite Suisse"
-        }
+        "sender": {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
     }
 
     headers = {
@@ -140,6 +130,9 @@ def envoyer_email_avis(destinataire, prenom):
     }
 
     requests.post(BREVO_URL, json=payload, headers=headers)
+
+
+
 # =========================================================
 #   ROUTE : RÉCEPTION FORMULAIRE → GOOGLE SHEET + EMAIL CONFIRMATION
 # =========================================================
@@ -173,7 +166,6 @@ def submit(data: dict):
 
     sheet.append_row(row)
 
-    # === Envoi Email 1 : CONFIRMATION ===
     envoyer_email_confirmation(
         destinataire=data.get("email"),
         prenom=data.get("prenom")
@@ -231,7 +223,6 @@ def envoyer_pdf(email: str):
 
     row = sheet.get_all_values()[index]
 
-    # Données pour PDF
     donnees = {
         "prenom": row[0],
         "nom": row[1],
@@ -253,22 +244,22 @@ def envoyer_pdf(email: str):
         "souhaits": row[17]
     }
 
-    # Calcul + PDF
     resultat = calcul_complet_retraite(donnees)
     pdf_path = generer_pdf_estimation(donnees, resultat)
 
-    # === Envoi Email 2 : Résultat + PDF ===
     envoyer_email_resultat(
         destinataire=donnees["email"],
         prenom=donnees["prenom"],
         pdf_path=pdf_path
     )
 
-    # === Mise à jour Google Sheet ===
-    sheet.update_cell(index + 1, 19, "1")  # PDF envoyé
+    sheet.update_cell(index + 1, 19, "1")
     sheet.update_cell(index + 1, 20, datetime.now().strftime("%d.%m.%Y - %H:%M"))
 
     return {"success": True, "message": "PDF envoyé au client."}
+
+
+
 # =========================================================
 #   ROUTE CRON : ENVOYER AVIS J+1 AUTOMATIQUEMENT
 # =========================================================
@@ -277,22 +268,18 @@ def cron_avis():
 
     rows = sheet.get_all_values()
 
-    # On commence à la ligne 1 (car ligne 0 = header)
     for idx in range(1, len(rows)):
         row = rows[idx]
 
-        pdf_envoye = row[18]           # "PDF envoyé" colonne 19
-        avis_envoye = row[20]          # "Mail Avis envoyé" colonne 21
+        pdf_envoye = row[18]
+        avis_envoye = row[20]
         email = row[2]
         prenom = row[0]
 
-        # Conditions : PDF envoyé ET mail avis non envoyé
         if pdf_envoye == "1" and avis_envoye == "0":
 
-            # Envoi email Avis
             envoyer_email_avis(email, prenom)
 
-            # On marque "Avis envoyé = 1"
             sheet.update_cell(idx + 1, 21, "1")
 
             print(f"✔ Avis envoyé à : {email}")
@@ -307,14 +294,13 @@ def cron_avis():
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens = {}
 
-
 @app.get("/admin-login")
 def admin_login(password: str):
     if password != ADMIN_PASSWORD:
         return {"success": False}
 
     token = str(uuid.uuid4())
-    admin_tokens[token] = time.time() + 600  # expire dans 10 minutes
+    admin_tokens[token] = time.time() + 600
 
     return {"success": True, "token": token}
 
@@ -330,14 +316,40 @@ def verify_token(token: str):
 
     return {"allowed": True}
 
+
+
+# =========================================================
+#   🎯 ROUTE : LISTE CLIENTS (ADMIN) — VERSION FINALE
+# =========================================================
 @app.get("/list")
 def list_clients():
     try:
-        with open("clients.json", "r") as f:
-            data = json.load(f)
-        return {"clients": data}
+        rows = sheet.get_all_values()
+
+        rows = rows[1:]  # enlever header
+
+        clients = []
+        for row in rows:
+            if len(row) < 3:
+                continue
+
+            clients.append({
+                "prenom": row[0],
+                "nom": row[1],
+                "email": row[2],
+                "telephone": row[3],
+                "statut_civil": row[4],
+                "age_actuel": row[5],
+                "age_retraite": row[6],
+                "salaire_annuel": row[7],
+                "revenu_brut": row[8],
+            })
+
+        return {"clients": clients}
+
     except Exception as e:
         return {"error": str(e)}
+
 
 
 # =========================================================
