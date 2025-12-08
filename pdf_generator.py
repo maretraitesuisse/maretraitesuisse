@@ -1,6 +1,5 @@
 import os
 import datetime
-from math import sin, cos, radians
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
@@ -8,7 +7,6 @@ from reportlab.lib.units import cm
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
 import matplotlib.pyplot as plt
 
 
@@ -75,7 +73,7 @@ def create_graph(avs, lpp, total):
 # ==========================================
 
 def build_table(data, col_widths=None):
-    table = Table(data, colWidths=col_widths)
+    table = Table(data, colWidths=col_width_widths := col_widths)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
@@ -100,38 +98,35 @@ def build_table(data, col_widths=None):
 # ==========================================
 
 def draw_cover_page(c, width, height):
-    # Bandeau diagonal rouge premium
-    c.saveState()
+    # ---- Bandeau diagonal premium compatible Render ----
+    path = c.beginPath()
+    path.moveTo(0, height)
+    path.lineTo(width, height - 4*cm)
+    path.lineTo(width, height)
+    path.lineTo(0, height)
+    path.close()
+
     c.setFillColor(PRIMARY)
+    c.drawPath(path, fill=1, stroke=0)
 
-    # On trace un polygone diagonal premium
-    c.beginPath()
-    c.moveTo(0, height)
-    c.lineTo(width, height - 4*cm)
-    c.lineTo(width, height)
-    c.lineTo(0, height)
-    c.close()
-    c.fill()
-    c.restoreState()
-
-    # Logo
+    # ---- Logo ----
     try:
         logo = ImageReader("logo.png")
         c.drawImage(logo, 1.5*cm, height - 3.8*cm, width=4.2*cm, preserveAspectRatio=True)
     except:
         pass
 
-    # Titre premium centré
+    # ---- Titre premium ----
     c.setFont("Helvetica-Bold", 28)
     c.setFillColor(WHITE)
     c.drawCentredString(width/2, height - 7*cm, "Analyse personnalisée")
 
-    # Sous-titre
+    # ---- Sous-titre ----
     c.setFont("Helvetica", 14)
     c.setFillColor(WHITE)
     c.drawCentredString(width/2, height - 8.3*cm, "AVS · LPP · 3ᵉ pilier · Projection financière")
 
-    # Bande graphique inférieure premium
+    # ---- Bande graphique bas ----
     c.setFillColor(PRIMARY)
     c.rect(0, 0, width, 1.2*cm, fill=True, stroke=False)
 
@@ -147,7 +142,7 @@ def draw_cover_page(c, width, height):
 
 def generer_pdf_estimation(donnees, resultats, output=None):
 
-    # === Variables retraite ===
+    # === Valeurs retraite ===
     avs_annuel = resultats.get("rente_avs", 0)
     lpp_annuel = resultats.get("rente_lpp", 0)
     conjoint_annuel = resultats.get("rente_conjoint", 0)
@@ -158,24 +153,25 @@ def generer_pdf_estimation(donnees, resultats, output=None):
     conjoint_mensuel = conjoint_annuel / 12
     total_mensuel = total_annuel / 12
 
-    # === Nom dynamique ===
+    # === Nom dynamique du fichier ===
     nom = donnees.get("nom", "Client").upper()
     annee = datetime.datetime.now().year
     filename = f"estimation_{nom}_{annee}.pdf".replace(" ", "_")
+
     if output is None:
         output = filename
 
     c = canvas.Canvas(output, pagesize=A4)
     width, height = A4
 
-    # ---------------------------
+    # ----------------------------------
     # PAGE 1 — Couverture premium
-    # ---------------------------
+    # ----------------------------------
     draw_cover_page(c, width, height)
 
-    # ---------------------------
+    # ----------------------------------
     # PAGE 2 — Résumé + Tableau
-    # ---------------------------
+    # ----------------------------------
 
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(PRIMARY)
@@ -210,9 +206,9 @@ def generer_pdf_estimation(donnees, resultats, output=None):
 
     c.showPage()
 
-    # ---------------------------
+    # ----------------------------------
     # PAGE 3 — Graphique + Analyse
-    # ---------------------------
+    # ----------------------------------
 
     graph_path = create_graph(avs_annuel, lpp_annuel, total_annuel)
 
@@ -231,8 +227,7 @@ def generer_pdf_estimation(donnees, resultats, output=None):
         • Votre revenu futur repose principalement sur 
           {"l’AVS" if avs_annuel > lpp_annuel else "le 2ᵉ pilier"}.<br/>
         • Votre niveau de rente est de <b>{total_mensuel:,.0f} CHF/mois</b>,
-          ce qui est {"inférieur" if total_mensuel < 3200 else "en ligne"} avec les seuils usuels pour maintenir le
-          niveau de vie en Suisse.<br/>
+          ce qui est {"inférieur" if total_mensuel < 3200 else "cohérent"} avec le niveau de vie moyen en Suisse.<br/>
         • Une optimisation du 3ᵉ pilier renforcerait votre stabilité financière à long terme.<br/><br/>
         """,
         paragraph
@@ -243,9 +238,9 @@ def generer_pdf_estimation(donnees, resultats, output=None):
 
     c.showPage()
 
-    # ---------------------------
+    # ----------------------------------
     # PAGE 4 — Recommandations
-    # ---------------------------
+    # ----------------------------------
 
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(PRIMARY)
@@ -271,6 +266,10 @@ def generer_pdf_estimation(donnees, resultats, output=None):
     reco.drawOn(c, 2*cm, height - 18*cm)
 
     c.showPage()
+
+    # ----------------------------------
+    # FIN & CLEAN
+    # ----------------------------------
 
     c.save()
 
