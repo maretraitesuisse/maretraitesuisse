@@ -10,43 +10,32 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import matplotlib.pyplot as plt
 
 
-# ==========================================
-#        COULEURS MA RETRAITE SUISSE
-# ==========================================
+# =============================
+#     COULEURS MRS
+# =============================
 
 PRIMARY = colors.HexColor("#D61D1D")
 PRIMARY_DARK = colors.HexColor("#9A0000")
 BLACK = colors.HexColor("#1D1D1F")
-GREY = colors.HexColor("#F5F5F7")
-DARK_GREY = colors.HexColor("#4A4A4A")
 WHITE = colors.white
+GREY = colors.HexColor("#F5F5F7")
 
 styles = getSampleStyleSheet()
 
-paragraph = ParagraphStyle(
-    "paragraph",
+text_style = ParagraphStyle(
+    "BodyText",
     fontName="Helvetica",
     fontSize=11,
     leading=16,
-    textColor=BLACK,
+    textColor=BLACK
 )
 
-title_style = ParagraphStyle(
-    "title",
-    fontName="Helvetica-Bold",
-    fontSize=26,
-    leading=30,
-    textColor=WHITE,
-    alignment=1
-)
-
-
-# ==========================================
-#        GRAPHIQUE PREMIUM
-# ==========================================
+# =============================
+#  GRAPHIQUE PREMIUM
+# =============================
 
 def create_graph(avs, lpp, total):
-    plt.figure(figsize=(6, 3))
+    plt.figure(figsize=(5, 2.5))
 
     bars = ["AVS", "LPP", "Total"]
     values = [avs, lpp, total]
@@ -54,33 +43,29 @@ def create_graph(avs, lpp, total):
 
     plt.bar(bars, values, color=colors_mrs, width=0.55)
 
-    for i, val in enumerate(values):
-        plt.text(i, val + val * 0.02, f"{val:,.0f} CHF",
-                 ha='center', fontsize=10, fontweight='bold')
+    for i, v in enumerate(values):
+        plt.text(i, v + v*0.02, f"{v:,.0f} CHF", ha="center", fontsize=10)
 
-    plt.title("Projection annuelle des rentes", fontsize=14, fontweight="bold")
+    plt.title("Projection annuelle des rentes", fontsize=13, fontweight="bold")
     plt.ylabel("Montants (CHF)")
     plt.grid(axis="y", linestyle="--", alpha=0.35)
 
-    graph_path = "graph_temp.png"
-    plt.savefig(graph_path, dpi=240, bbox_inches="tight")
+    path = "graph_temp.png"
+    plt.savefig(path, dpi=200, bbox_inches="tight")
     plt.close()
-    return graph_path
+    return path
 
-
-# ==========================================
-#        TABLEAU PREMIUM
-# ==========================================
+# =============================
+#  TABLEAU
+# =============================
 
 def build_table(data, col_widths=None):
-    table = Table(data, colWidths=col_widths)
-
-    table.setStyle(TableStyle([
+    t = Table(data, colWidths=col_widths)
+    t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTSIZE", (0, 0), (-1, 0), 11),
 
         ("BACKGROUND", (0, 1), (-1, -1), WHITE),
         ("TEXTCOLOR", (0, 1), (-1, -1), BLACK),
@@ -91,18 +76,18 @@ def build_table(data, col_widths=None):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
     ]))
-    return table
+    return t
 
-
-# ==========================================
-#        PAGE 1 — COUVERTURE PREMIUM
-# ==========================================
+# =============================
+#  PAGE 1 : COUVERTURE PREMIUM
+# =============================
 
 def draw_cover_page(c, width, height):
-    # ---- Bandeau diagonal premium compatible Render ----
+
+    # ==== Bande diagonale rouge ====
     path = c.beginPath()
     path.moveTo(0, height)
-    path.lineTo(width, height - 4*cm)
+    path.lineTo(width, height - 3.5*cm)
     path.lineTo(width, height)
     path.lineTo(0, height)
     path.close()
@@ -110,40 +95,57 @@ def draw_cover_page(c, width, height):
     c.setFillColor(PRIMARY)
     c.drawPath(path, fill=1, stroke=0)
 
-    # ---- Logo ----
+    # ==== Logo (haut gauche) ====
     try:
         logo = ImageReader("logo.png")
-        c.drawImage(logo, 1.5*cm, height - 3.8*cm, width=4.2*cm, preserveAspectRatio=True)
+        c.drawImage(logo, 1.5*cm, height - 4.2*cm,
+                    width=4.2*cm, preserveAspectRatio=True, mask='auto')
     except:
         pass
 
-    # ---- Titre premium ----
-    c.setFont("Helvetica-Bold", 28)
+    # ==== Titres ====
     c.setFillColor(WHITE)
-    c.drawCentredString(width/2, height - 7*cm, "Analyse personnalisée")
+    c.setFont("Helvetica-Bold", 26)
+    c.drawString(1.5*cm, height - 6.8*cm, "Étude de prévoyance – Ma Retraite Suisse")
 
-    # ---- Sous-titre ----
     c.setFont("Helvetica", 14)
-    c.setFillColor(WHITE)
-    c.drawCentredString(width/2, height - 8.3*cm, "AVS · LPP · 3ᵉ pilier · Projection financière")
+    c.drawString(1.5*cm, height - 8.3*cm, "AVS · LPP · 3e pilier · Projection financière")
 
-    # ---- Bande graphique bas ----
-    c.setFillColor(PRIMARY)
-    c.rect(0, 0, width, 1.2*cm, fill=True, stroke=False)
+    annee = datetime.datetime.now().year
+    c.setFont("Helvetica-Oblique", 12)
+    c.drawString(1.5*cm, height - 9.7*cm, f"Rapport {annee}")
 
-    c.setFillColor(PRIMARY_DARK)
-    c.rect(0, 1.2*cm, width, 0.4*cm, fill=True, stroke=False)
+    # ==== Bannière image consulting ====
+    try:
+        banner = ImageReader("ban.jpg")
+
+        banner_height = height * 0.40
+
+        c.drawImage(banner,
+                    0,
+                    0,
+                    width=width,
+                    height=banner_height,
+                    preserveAspectRatio=True,
+                    mask='auto')
+
+        # Overlay rouge transparent pour homogénéiser
+        c.setFillColorRGB(0.8, 0.1, 0.1, alpha=0.25)
+        c.rect(0, 0, width, banner_height, fill=True, stroke=False)
+
+    except Exception as e:
+        print("Erreur bannière:", e)
 
     c.showPage()
 
 
-# ==========================================
-#        FONCTION PRINCIPALE
-# ==========================================
+# =============================
+#  FONCTION PRINCIPALE
+# =============================
 
 def generer_pdf_estimation(donnees, resultats, output=None):
 
-    # === Valeurs retraite ===
+    # === Données retraite ===
     avs_annuel = resultats.get("rente_avs", 0)
     lpp_annuel = resultats.get("rente_lpp", 0)
     conjoint_annuel = resultats.get("rente_conjoint", 0)
@@ -154,26 +156,23 @@ def generer_pdf_estimation(donnees, resultats, output=None):
     conjoint_mensuel = conjoint_annuel / 12
     total_mensuel = total_annuel / 12
 
-    # === Nom dynamique du fichier ===
+    # === Nom dynamique ===
     nom = donnees.get("nom", "Client").upper()
     annee = datetime.datetime.now().year
-    filename = f"estimation_{nom}_{annee}.pdf".replace(" ", "_")
-
     if output is None:
-        output = filename
+        output = f"estimation_{nom}_{annee}.pdf".replace(" ", "_")
 
     c = canvas.Canvas(output, pagesize=A4)
     width, height = A4
 
-    # ----------------------------------
-    # PAGE 1 — Couverture premium
-    # ----------------------------------
+    # -------------------------
+    # PAGE 1 — COUVERTURE
+    # -------------------------
     draw_cover_page(c, width, height)
 
-    # ----------------------------------
-    # PAGE 2 — Résumé + Tableau
-    # ----------------------------------
-
+    # -------------------------
+    # PAGE 2 — RÉSUMÉ
+    # -------------------------
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(PRIMARY)
     c.drawString(2*cm, height - 2.5*cm, "Résumé de votre situation")
@@ -192,14 +191,10 @@ def generer_pdf_estimation(donnees, resultats, output=None):
 
     intro = Paragraph(
         f"""
-        <b>Votre situation :</b><br/><br/>
-        • Votre revenu total projeté est de <b>{total_annuel:,.0f} CHF/an</b>
+        • Votre revenu projeté est de <b>{total_annuel:,.0f} CHF/an</b>
           (<b>{total_mensuel:,.0f} CHF/mois</b>).<br/>
-        • Répartition : AVS <b>{(avs_annuel/total_annuel*100):.1f}%</b> —
-          LPP <b>{(lpp_annuel/total_annuel*100):.1f}%</b>.<br/><br/>
-        Cette estimation vous offre une vision claire et structurée de vos droits actuels.
-        """,
-        paragraph
+        • Répartition : AVS {avs_annuel/total_annuel*100:.1f}% — LPP {lpp_annuel/total_annuel*100:.1f}%.<br/><br/>
+        """, text_style
     )
 
     intro.wrapOn(c, width - 4*cm, height)
@@ -207,31 +202,26 @@ def generer_pdf_estimation(donnees, resultats, output=None):
 
     c.showPage()
 
-    # ----------------------------------
-    # PAGE 3 — Graphique + Analyse
-    # ----------------------------------
-
+    # -------------------------
+    # PAGE 3 — GRAPHIQUE
+    # -------------------------
     graph_path = create_graph(avs_annuel, lpp_annuel, total_annuel)
 
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(PRIMARY)
-    c.drawString(2*cm, height - 2.5*cm, "Analyse de vos rentes")
+    c.drawString(2*cm, height - 2.5*cm, "Analyse visuelle")
 
     try:
-        c.drawImage(graph_path, 2*cm, height - 15*cm, width=14*cm, preserveAspectRatio=True)
+        c.drawImage(graph_path, 2*cm, height - 15*cm,
+                    width=14*cm, preserveAspectRatio=True)
     except:
         pass
 
     analyse = Paragraph(
         f"""
-        <b>Interprétation :</b><br/><br/>
-        • Votre revenu futur repose principalement sur 
-          {"l’AVS" if avs_annuel > lpp_annuel else "le 2ᵉ pilier"}.<br/>
-        • Votre niveau de rente est de <b>{total_mensuel:,.0f} CHF/mois</b>,
-          ce qui est {"inférieur" if total_mensuel < 3200 else "cohérent"} avec le niveau de vie moyen en Suisse.<br/>
-        • Une optimisation du 3ᵉ pilier renforcerait votre stabilité financière à long terme.<br/><br/>
-        """,
-        paragraph
+        • Votre revenu repose principalement sur {'l’AVS' if avs_annuel > lpp_annuel else 'le 2e pilier'}.<br/>
+        • Votre niveau de rente est de <b>{total_mensuel:,.0f} CHF/mois</b>.<br/>
+        """, text_style
     )
 
     analyse.wrapOn(c, width - 4*cm, height)
@@ -239,39 +229,26 @@ def generer_pdf_estimation(donnees, resultats, output=None):
 
     c.showPage()
 
-    # ----------------------------------
-    # PAGE 4 — Recommandations
-    # ----------------------------------
-
+    # -------------------------
+    # PAGE 4 — RECOMMANDATIONS
+    # -------------------------
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(PRIMARY)
     c.drawString(2*cm, height - 2.5*cm, "Recommandations professionnelles")
 
     reco = Paragraph(
         """
-        <b>Nos recommandations :</b><br/><br/>
-
-        • Optimiser votre 3ᵉ pilier (A/B) pour augmenter votre rente future.<br/>
-        • Envisager un rachat LPP si votre situation le permet.<br/>
-        • Ajuster votre stratégie selon vos besoins (anticipation, capital ou rente).<br/>
-        • Réévaluer votre planification chaque année pour intégrer vos évolutions.<br/><br/>
-
-        <b>Conclusion :</b><br/>
-        Ma Retraite Suisse reste à votre disposition pour un accompagnement personnalisé,
-        sans engagement, afin d'améliorer et sécuriser votre situation financière future.
+        • Optimiser votre 3e pilier pour augmenter votre rente.<br/>
+        • Envisager des rachats LPP selon votre situation.<br/>
+        • Ajuster votre stratégie selon vos objectifs.<br/><br/>
         """,
-        paragraph
+        text_style
     )
 
     reco.wrapOn(c, width - 4*cm, height)
     reco.drawOn(c, 2*cm, height - 18*cm)
 
     c.showPage()
-
-    # ----------------------------------
-    # FIN & CLEAN
-    # ----------------------------------
-
     c.save()
 
     if os.path.exists("graph_temp.png"):
