@@ -73,7 +73,8 @@ def create_graph(avs, lpp, total):
 # ==========================================
 
 def build_table(data, col_widths=None):
-    table = Table(data, colWidths=col_width_widths := col_widths)
+    table = Table(data, colWidths=col_widths)
+
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
