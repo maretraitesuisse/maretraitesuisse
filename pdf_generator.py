@@ -97,68 +97,71 @@ def build_table(data, col_widths=None):
 # =============================
 
 def draw_cover_page(c, width, height):
-    # ==== Bande diagonale haut ====
+    # ==== Bande diagonale ====
     path = c.beginPath()
     path.moveTo(0, height)
-    path.lineTo(width, height - 3.8 * cm)
+    path.lineTo(width, height - 3 * cm)
     path.lineTo(width, height)
     path.lineTo(0, height)
     path.close()
-
     c.setFillColor(PRIMARY)
     c.drawPath(path, fill=1, stroke=0)
 
     # ==== Logo ====
     try:
         logo = ImageReader("logo.png")
-        c.drawImage(logo,
-                    1.5 * cm,
-                    height - 4.8 * cm,
-                    width=4.2 * cm,
-                    preserveAspectRatio=True,
-                    mask='auto')
+        c.drawImage(
+            logo,
+            1.5 * cm,
+            height - 5.2 * cm,
+            width=4 * cm,
+            preserveAspectRatio=True,
+            mask='auto'
+        )
     except:
         pass
 
-    # ==== Titre ====
-    c.setFillColor(WHITE)
-    c.setFont("Helvetica-Bold", 26)
-    c.drawString(1.5 * cm, height - 7 * cm, "Étude de prévoyance – Ma Retraite Suisse")
+    # ==== TITRE ====
+    c.setFont("Helvetica-Bold", 28)
+    c.setFillColor(BLACK)
+    c.drawString(1.5 * cm, height - 8.5 * cm,
+                 "Étude de prévoyance – Ma Retraite Suisse")
 
     # ==== Sous-titre ====
-    c.setFont("Helvetica", 14)
-    c.drawString(1.5 * cm, height - 8.5 * cm,
+    c.setFont("Helvetica", 15)
+    c.setFillColor(BLACK)
+    c.drawString(1.5 * cm, height - 10 * cm,
                  "AVS · LPP · 3e pilier · Projection financière")
 
     # ==== Année ====
     annee = datetime.datetime.now().year
     c.setFont("Helvetica-Oblique", 12)
-    c.drawString(1.5 * cm, height - 10 * cm, f"Rapport {annee}")
+    c.drawString(1.5 * cm, height - 11.5 * cm,
+                 f"Rapport {annee}")
 
-    # ==== Bannière consulting (bas) ====
+    # ==== Bannière consulting ====
     try:
         banner = ImageReader("ban.jpg")
-        banner_height = height * 0.42
+        banner_height = height * 0.33  # 33% = bon équilibre
 
-        c.drawImage(banner,
-                    0,
-                    0,
-                    width=width,
-                    height=banner_height,
-                    preserveAspectRatio=True,
-                    mask='auto')
+        c.drawImage(
+            banner,
+            0,
+            0,
+            width=width,
+            height=banner_height,
+            preserveAspectRatio=True,
+            mask='auto'
+        )
 
-        # ---- Overlay rouge (compatible Render, pas d’alpha) ----
-        c.setFillColorRGB(0.55, 0.05, 0.05)  # rouge sombre pour teinte premium
-        c.setFillAlpha(0.28)
+        # Overlay rouge léger sans alpha
+        c.setFillColorRGB(0.8, 0.05, 0.05)
         c.rect(0, 0, width, banner_height, fill=True, stroke=False)
-        c.setFillAlpha(1)
 
     except Exception as e:
         print("Erreur bannière:", e)
 
     c.showPage()
-
 
 # =============================
 #  FONCTION PRINCIPALE
