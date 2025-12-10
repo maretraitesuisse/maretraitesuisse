@@ -97,65 +97,69 @@ def build_table(data, col_widths=None):
 # =============================
 
 def draw_cover_page(c, width, height):
-    # ==== Bande diagonale ====
+
+    # ===== DIAGONALE ROUGE =====
     path = c.beginPath()
     path.moveTo(0, height)
-    path.lineTo(width, height - 3 * cm)
+    path.lineTo(width, height - 3*cm)
     path.lineTo(width, height)
     path.lineTo(0, height)
     path.close()
-
     c.setFillColor(PRIMARY)
     c.drawPath(path, fill=1, stroke=0)
 
-    # ==== Logo ====
+    # ===== LOGO (centré) =====
     try:
-        logo = ImageReader("logo.png")
+        logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+        logo = ImageReader(logo_path)
         c.drawImage(
             logo,
-            1.5 * cm,
-            height - 5 * cm,
-            width=4.2 * cm,
+            (width - 5*cm)/2,
+            height - 15*cm,
+            width=5*cm,
             preserveAspectRatio=True,
             mask='auto'
         )
-    except:
-        pass
+    except Exception as e:
+        print("Erreur logo:", e)
 
-    # ==== Titre ====
+    # ===== TITRE =====
     c.setFillColor(BLACK)
     c.setFont("Helvetica-Bold", 27)
-    c.drawString(1.5 * cm, height - 8.5 * cm,
+    c.drawString(1.5*cm, height - 8.5*cm,
                  "Étude de prévoyance – Ma Retraite Suisse")
 
-    # ==== Sous-titre ====
+    # ===== SOUS-TITRE =====
     c.setFont("Helvetica", 15)
-    c.drawString(1.5 * cm, height - 10 * cm,
+    c.drawString(1.5*cm, height - 10*cm,
                  "AVS · LPP · 3e pilier · Projection financière")
 
-    # ==== Année ====
+    # ===== ANNÉE =====
     annee = datetime.datetime.now().year
     c.setFont("Helvetica-Oblique", 12)
-    c.drawString(1.5 * cm, height - 11.5 * cm,
+    c.drawString(1.5*cm, height - 11.5*cm,
                  f"Rapport {annee}")
 
-    # ==== Bannière consulting (compatible Render : SANS transparence) ====
+    # ===== BANNIÈRE FULL WIDTH COLLEE EN BAS =====
     try:
-        banner = ImageReader("ban.jpg")
-        banner_height = height * 0.34
+        banner_path = os.path.join(os.path.dirname(__file__), "ban.jpg")
+        banner = ImageReader(banner_path)
+
+        banner_height = height * 0.40
+        banner_y = 20
 
         c.drawImage(
             banner,
             0,
-            0,
+            banner_y,
             width=width,
             height=banner_height,
             preserveAspectRatio=True,
             mask='auto'
         )
 
-        # Bande rouge opaque fine (embellissement sans alpha)
-        c.setFillColor(PRIMARY_DARK)
+        # Barre rouge fine
+        c.setFillColor(PRIMARY)
         c.rect(0, 0, width, 20, fill=True, stroke=False)
 
     except Exception as e:
@@ -169,18 +173,19 @@ def draw_cover_page(c, width, height):
 # =============================
 
 def generer_pdf_estimation(donnees, resultats, output=None):
+
     avs_annuel = resultats.get("rente_avs", 0)
     lpp_annuel = resultats.get("rente_lpp", 0)
     conjoint_annuel = resultats.get("rente_conjoint", 0)
-    total_annuel = resultats.get("total_retraite", avs_annuel + lpp_annuel + conjoint_annuel)
+    total_annuel = avs_annuel + lpp_annuel + conjoint_annuel
 
     avs_m = avs_annuel / 12
     lpp_m = lpp_annuel / 12
     conjoint_m = conjoint_annuel / 12
     total_m = total_annuel / 12
 
-    nom = donnees.get("nom", "Client").upper()
     annee = datetime.datetime.now().year
+    nom = donnees.get("nom", "Client").upper()
 
     if output is None:
         output = f"estimation_{nom}_{annee}.pdf".replace(" ", "_")
@@ -188,13 +193,13 @@ def generer_pdf_estimation(donnees, resultats, output=None):
     c = canvas.Canvas(output, pagesize=A4)
     width, height = A4
 
-    # --- PAGE 1 : COUVERTURE ---
+    # --- COUVERTURE ---
     draw_cover_page(c, width, height)
 
-    # --- PAGE 2 : RÉSUMÉ ---
+    # --- PAGE 2 ---
     c.setFont("Helvetica-Bold", 19)
     c.setFillColor(PRIMARY)
-    c.drawString(2 * cm, height - 2.5 * cm, "Résumé de votre situation")
+    c.drawString(2*cm, height - 2.5*cm, "Résumé de votre situation")
 
     résumé = [
         ["Élément", "Annuel", "Mensuel"],
@@ -208,22 +213,21 @@ def generer_pdf_estimation(donnees, resultats, output=None):
     table.wrapOn(c, width, height)
     table.drawOn(c, 2*cm, height - 13.5*cm)
 
-    texte_intro = Paragraph(
+    intro = Paragraph(
         f"""
-        Votre revenu estimé total est de <b>{total_annuel:,.0f} CHF/an</b>,
-        soit <b>{total_m:,.0f} CHF/mois</b>.<br/>
-        La répartition actuelle entre AVS et LPP montre une dépendance de
-        <b>{avs_annuel / total_annuel * 100:.1f}%</b> envers l’AVS et 
-        <b>{lpp_annuel / total_annuel * 100:.1f}%</b> envers votre deuxième pilier.
+        Votre revenu total estimé atteint <b>{total_annuel:,.0f} CHF/an</b>,
+        soit <b>{total_m:,.0f} CHF/mois</b>. Cette projection repose
+        sur vos informations actuelles et offre un aperçu clair de votre
+        niveau de prévoyance.
         """,
         text_style
     )
-    texte_intro.wrapOn(c, width - 4*cm, height)
-    texte_intro.drawOn(c, 2*cm, height - 17.5*cm)
+    intro.wrapOn(c, width - 4*cm, height)
+    intro.drawOn(c, 2*cm, height - 17.5*cm)
 
     c.showPage()
 
-    # --- PAGE 3 : GRAPHIQUE ---
+    # --- PAGE 3 ---
     graph_path = create_graph(avs_annuel, lpp_annuel, total_annuel)
 
     c.setFont("Helvetica-Bold", 18)
@@ -240,39 +244,34 @@ def generer_pdf_estimation(donnees, resultats, output=None):
         pass
 
     analyse = Paragraph(
-        f"""
-        Votre situation révèle une orientation financière principalement basée sur 
-        <b>{'l’AVS' if avs_annuel > lpp_annuel else 'le 2e pilier'}</b>.
-        Une optimisation ciblée du 3e pilier permettrait de renforcer efficacement
-        votre indépendance financière future.
+        """
+        Cette projection met en lumière la répartition de vos revenus
+        futurs entre les différents piliers. Un équilibre optimal entre
+        AVS, LPP et 3e pilier permet de garantir une stabilité durable.
         """,
         text_style
     )
-
     analyse.wrapOn(c, width - 4*cm, height)
     analyse.drawOn(c, 2*cm, height - 18*cm)
 
     c.showPage()
 
-    # --- PAGE 4 : RECOMMANDATIONS ---
+    # --- PAGE 4 ---
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(PRIMARY)
     c.drawString(2*cm, height - 2.5*cm, "Recommandations professionnelles")
 
     reco = Paragraph(
         """
-        <b>Nos recommandations :</b><br/><br/>
-        • Optimiser votre 3e pilier pour augmenter votre rendement futur.<br/>
-        • Envisager un rachat LPP en fonction de votre capacité financière.<br/>
-        • Ajuster la répartition entre rente et capital selon vos objectifs.<br/>
-        • Réaliser un point prévoyance tous les 12 mois.<br/><br/>
-
-        <i>Ma Retraite Suisse se tient à votre disposition pour un accompagnement
-        personnalisé et confidentiel.</i>
+        Pour améliorer votre prévoyance :<br/><br/>
+        • Optimisez votre 3e pilier pour augmenter votre capital futur.<br/>
+        • Étudiez un éventuel rachat LPP selon vos capacités.<br/>
+        • Ajustez votre stratégie en fonction de vos objectifs personnels.<br/><br/>
+        <i>Notre équipe reste disponible pour vous accompagner dans un cadre
+        professionnel et confidentiel.</i>
         """,
         text_style
     )
-
     reco.wrapOn(c, width - 4*cm, height)
     reco.drawOn(c, 2*cm, height - 17*cm)
 
