@@ -1,15 +1,12 @@
 # ===============================================================
 #  Simulateur Retraite Suisse — AVS + LPP
-#  Traduction STRICTE du moteur React fourni
-#  Base légale : Échelle 44 (2026)
+#  Moteur métier central (aligné React)
 # ===============================================================
 
-from dataclasses import dataclass
-from typing import Optional, Dict
-
+from typing import Dict
 
 # ===============================================================
-#  CONSTANTES (identiques au React)
+#  CONSTANTES
 # ===============================================================
 
 AVS_RENTE_MAX = 2520
@@ -20,7 +17,7 @@ SEUIL_MAX_RAMD = 90720
 CARRIERE_PLEINE = 44
 PLAFOND_COUPLE = 3780
 
-BONIF_CREDIT = 3 * AVS_RENTE_MIN * 12  # Bonification annuelle
+BONIF_CREDIT = 3 * AVS_RENTE_MIN * 12
 DEDUCTION_COORD = 26460
 SEUIL_ENTREE_LPP = 22680
 TAUX_CONVERSION = 0.058
@@ -31,7 +28,6 @@ TAUX_EPARGNE = {
     "45-54": 0.15,
     "55+": 0.18,
 }
-
 
 # ===============================================================
 #  OUTILS
@@ -59,40 +55,30 @@ def calcul_salaire_coordonne(salaire: float) -> float:
 #  LPP
 # ===============================================================
 
-def reconstruire_lpp(age_actuel: int, salaire_actuel: float, annees_cotisees: int) -> float:
-    age_debut = max(25, age_actuel - annees_cotisees)
-    if age_actuel <= age_debut:
-        return 0.0
-
+def reconstruire_lpp(age_actuel: int, salaire: float, annees: int) -> float:
+    age_debut = max(25, age_actuel - annees)
     capital = 0.0
-    annees = age_actuel - age_debut
-    salaire = salaire_actuel / (1.005 ** annees)
+    salaire_base = salaire / (1.005 ** annees)
 
     for age in range(age_debut, age_actuel):
-        if age > age_debut:
-            salaire *= 1.005
         taux = get_taux_epargne(age)
-        salaire_coord = calcul_salaire_coordonne(salaire)
+        salaire_coord = calcul_salaire_coordonne(salaire_base)
         capital += salaire_coord * taux
+        salaire_base *= 1.005
 
     return capital
 
 
-def calculer_lpp(age_actuel: int, age_retraite: int, salaire_initial: float, capital_initial: float) -> Dict:
-    capital = capital_initial
-    salaire = salaire_initial
-
+def calculer_lpp(age_actuel: int, age_retraite: int, salaire: float, capital: float) -> Dict:
     for age in range(age_actuel, age_retraite):
-        salaire *= 1.005
         taux = get_taux_epargne(age)
         salaire_coord = calcul_salaire_coordonne(salaire)
         capital += salaire_coord * taux
-
-    rente_annuelle = capital * TAUX_CONVERSION
+        salaire *= 1.005
 
     return {
-        "capital_final": capital,
-        "rente_mensuelle": rente_annuelle / 12
+        "capital_final": round(capital, 2),
+        "rente_mensuelle": round((capital * TAUX_CONVERSION) / 12, 2)
     }
 
 
@@ -100,116 +86,82 @@ def calculer_lpp(age_actuel: int, age_retraite: int, salaire_initial: float, cap
 #  AVS
 # ===============================================================
 
-def calculer_avs(
-    salaire_moyen: float,
-    annees_total: int,
-    annees_be: int = 0,
-    annees_ba: int = 0
-) -> Dict:
-
-    total_bonif = ((annees_be + annees_ba) * BONIF_CREDIT) / max(annees_total, 1)
-    ramd = salaire_moyen + total_bonif
+def calculer_avs(salaire_moyen: float, annees: int, be: int, ba: int) -> Dict:
+    bonifs = (be + ba) * BONIF_CREDIT / max(annees, 1)
+    ramd = salaire_moyen + bonifs
 
     if ramd >= SEUIL_MAX_RAMD:
-        rente_theo = AVS_RENTE_MAX
-    elif ramd <= 0:
-        rente_theo = AVS_RENTE_MIN
+        rente = AVS_RENTE_MAX
     else:
-        rente_theo = AVS_RENTE_MIN + (AVS_RENTE_MAX - AVS_RENTE_MIN) * (ramd / SEUIL_MAX_RAMD)
+        rente = AVS_RENTE_MIN + (AVS_RENTE_MAX - AVS_RENTE_MIN) * max(0, ramd) / SEUIL_MAX_RAMD
 
-    if annees_total < CARRIERE_PLEINE:
-        reduction = (CARRIERE_PLEINE - annees_total) / CARRIERE_PLEINE
-        rente_theo *= (1 - reduction)
-
-    rente_finale = max(rente_theo, AVS_RENTE_MIN)
+    if annees < CARRIERE_PLEINE:
+        rente *= annees / CARRIERE_PLEINE
 
     return {
-        "ramd": ramd,
-        "rente_theorique": rente_theo,
-        "rente_finale": rente_finale
+        "ramd": round(ramd, 2),
+        "rente_finale": round(max(rente, AVS_RENTE_MIN), 2)
     }
 
 
 # ===============================================================
-#  SIMULATEUR PRINCIPAL
+#  POINT D’ENTRÉE BACKEND
 # ===============================================================
 
-def simulateur_avs_lpp(donnees: Dict) -> Dict:
+def calcul_complet_retraite(donnees: Dict) -> Dict:
+    """
+    Fonction APPELÉE PAR FastAPI
+    → interface stable backend
+    """
+
     age_actuel = int(donnees["age_actuel"])
     age_retraite = int(donnees["age_retraite"])
-    salaire_actuel = float(donnees["salaire_actuel"])
-    salaire_moyen = float(donnees["salaire_moyen"])
-    annees_cotisees = int(donnees["annees_cotisees"])
 
+    salaire_actuel = float(donnees.get("salaire_actuel", donnees.get("salaire_annuel", 0)))
+    salaire_moyen = float(donnees.get("salaire_moyen_avs", donnees.get("salaire_moyen", 0)))
+
+    annees_avs = int(donnees.get("annees_avs", donnees.get("annees_cotisees", 0)))
     annees_be = int(donnees.get("annees_be", 0))
     annees_ba = int(donnees.get("annees_ba", 0))
 
-    statut_pro = donnees["statut_pro"]
-    statut_civil = donnees["statut_civil"]
+    statut_civil = donnees.get("statut_civil", "celibataire")
+    statut_pro = donnees.get("statut_pro", "salarie")
 
-    annees_restantes = age_retraite - age_actuel
-    annees_total = annees_cotisees + annees_restantes
+    capital_lpp = float(donnees.get("capital_lpp", 0))
+    rente_conjoint = float(donnees.get("rente_conjoint", 0))
 
-    # ================= LPP =================
-    capital_initial = float(donnees.get("capital_lpp", 0))
-    source_lpp = "Saisie client"
+    annees_total = annees_avs + (age_retraite - age_actuel)
 
-    if statut_pro == "independant":
-        if donnees.get("cotise_lpp") == "non":
-            capital_initial = 0.0
-            source_lpp = "Indépendant sans LPP"
-        else:
-            annees_lpp = int(donnees.get("annees_lpp_indep", 0))
-            if capital_initial == 0 and annees_lpp > 0:
-                capital_initial = 0.0
-                for age in range(age_actuel - annees_lpp, age_actuel):
-                    salaire_coord = calcul_salaire_coordonne(salaire_actuel)
-                    taux = get_taux_epargne(age)
-                    cotisation = salaire_coord * taux
-                    capital_initial += cotisation * (1.01 ** (age_actuel - age))
-                source_lpp = f"Estimé ({annees_lpp} ans)"
-
-    else:
-        if capital_initial == 0:
-            capital_initial = reconstruire_lpp(age_actuel, salaire_actuel, annees_cotisees)
-            source_lpp = "Estimé (conservateur)"
-
-    lpp = calculer_lpp(age_actuel, age_retraite, salaire_actuel, capital_initial)
-
-    # ================= AVS =================
+    # ===== AVS =====
     avs = calculer_avs(salaire_moyen, annees_total, annees_be, annees_ba)
-
     rente_avs = avs["rente_finale"]
-    rente_conjoint = 0.0
-    plafonnement = None
 
+    # ===== LPP =====
+    if capital_lpp == 0 and statut_pro != "independant":
+        capital_lpp = reconstruire_lpp(age_actuel, salaire_actuel, annees_avs)
+
+    lpp = calculer_lpp(age_actuel, age_retraite, salaire_actuel, capital_lpp)
+
+    # ===== COUPLE =====
     if statut_civil == "marie":
-        if donnees.get("rente_conjoint"):
-            rente_conjoint = float(donnees["rente_conjoint"])
-        else:
+        if rente_conjoint == 0:
             rente_conjoint = AVS_RENTE_MEDIANE
 
         total = rente_avs + rente_conjoint
         if total > PLAFOND_COUPLE:
-            excedent = total - PLAFOND_COUPLE
             ratio = rente_avs / total
+            excedent = total - PLAFOND_COUPLE
             rente_avs -= excedent * ratio
             rente_conjoint -= excedent * (1 - ratio)
-            plafonnement = True
-
-    rente_totale = rente_avs + lpp["rente_mensuelle"]
 
     return {
-        "avs": avs,
-        "lpp": {
-            "capital_initial": capital_initial,
-            "capital_final": lpp["capital_final"],
-            "rente_mensuelle": lpp["rente_mensuelle"],
-            "source": source_lpp
-        },
-        "rente_avs_finale": rente_avs,
-        "rente_conjoint": rente_conjoint,
-        "rente_totale_mensuelle": rente_totale,
-        "annees_total": annees_total,
-        "plafonnement_couple": plafonnement
+        "rente_avs": round(rente_avs, 2),
+        "rente_lpp": lpp["rente_mensuelle"],
+        "rente_conjoint": round(rente_conjoint, 2),
+        "total_retraite": round(rente_avs + lpp["rente_mensuelle"] + rente_conjoint, 2),
+        "details": {
+            "avs": avs,
+            "lpp": lpp,
+            "annees_total": annees_total
+        }
     }
