@@ -33,10 +33,16 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://maretraitesuisse.ch",
+        "https://www.maretraitesuisse.ch",
+        "https://maretraitesuisse.onrender.com"
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # =========================================================
 # CONFIG BREVO
