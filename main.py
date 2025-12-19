@@ -9,6 +9,7 @@ import uuid
 import base64
 import requests
 from datetime import datetime
+from typing import Optional
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,9 +46,15 @@ if not BREVO_API_KEY:
     raise Exception("BREVO_API_KEY manquant")
 
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
-SENDER = {"email": "noreply@maretraitesuisse.com", "name": "Ma Retraite Suisse"}
+SENDER = {"email": "noreply@maretraitesuisse.ch", "name": "Ma Retraite Suisse"}
 
-def envoyer_email(template_id: int, email: str, prenom: str, attachment_path: str | None = None):
+
+def envoyer_email(
+    template_id: int,
+    email: str,
+    prenom: str,
+    attachment_path: Optional[str] = None
+):
     payload = {
         "templateId": template_id,
         "to": [{"email": email}],
@@ -73,7 +80,7 @@ def envoyer_email(template_id: int, email: str, prenom: str, attachment_path: st
     )
 
 # =========================================================
-# ROUTE : SUBMIT FORMULAIRE (CLIENT + SIMULATION)
+# ROUTE : SUBMIT FORMULAIRE
 # =========================================================
 @app.post("/submit")
 def submit(data: dict, db: Session = Depends(get_db)):
@@ -95,7 +102,7 @@ def submit(data: dict, db: Session = Depends(get_db)):
     # 2️⃣ CALCUL
     resultat = calcul_complet_retraite(data)
 
-    # 3️⃣ SIMULATION
+    # 3️⃣ SIMULATION (on stocke AUSSI les données d’entrée)
     simulation = Simulation(
         client_id=client.id,
         statut_civil=data.get("statut_civil"),
@@ -109,14 +116,20 @@ def submit(data: dict, db: Session = Depends(get_db)):
         annees_ba=data.get("annees_ba"),
         capital_lpp=data.get("capital_lpp"),
         rente_conjoint=data.get("rente_conjoint"),
+        donnees=data,              # 🔑 IMPORTANT
         resultat=resultat
     )
 
     db.add(simulation)
     db.commit()
+    db.refresh(simulation)
 
     # 4️⃣ EMAIL CONFIRMATION
-    envoyer_email(template_id=1, email=client.email, prenom=client.prenom)
+    envoyer_email(
+        template_id=1,
+        email=client.email,
+        prenom=client.prenom
+    )
 
     return {
         "success": True,
@@ -125,10 +138,14 @@ def submit(data: dict, db: Session = Depends(get_db)):
     }
 
 # =========================================================
-# ROUTE : GENERATION + ENVOI PDF
+# ROUTE : ENVOI PDF (ADMIN)
 # =========================================================
 @app.post("/envoyer-pdf")
-def envoyer_pdf(simulation_id: int, db: Session = Depends(get_db)):
+def envoyer_pdf(simulation_id: int, token: str, db: Session = Depends(get_db)):
+
+    # 🔐 Vérification admin
+    if token not in admin_tokens or time.time() > admin_tokens[token]:
+        return {"success": False, "error": "unauthorized"}
 
     simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
     if not simulation:
@@ -136,8 +153,10 @@ def envoyer_pdf(simulation_id: int, db: Session = Depends(get_db)):
 
     client = db.query(Client).filter(Client.id == simulation.client_id).first()
 
-    data = simulation.resultat
-    pdf_path = generer_pdf_estimation(data, simulation.resultat)
+    pdf_path = generer_pdf_estimation(
+        simulation.donnees,
+        simulation.resultat
+    )
 
     envoyer_email(
         template_id=2,
@@ -149,18 +168,11 @@ def envoyer_pdf(simulation_id: int, db: Session = Depends(get_db)):
     return {"success": True}
 
 # =========================================================
-# ROUTE CRON (AVIS)
-# =========================================================
-@app.post("/cron-avis")
-def cron_avis(email: str, prenom: str):
-    envoyer_email(template_id=3, email=email, prenom=prenom)
-    return {"success": True}
-
-# =========================================================
 # ADMIN AUTH
 # =========================================================
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens: dict[str, float] = {}
+
 
 @app.get("/admin-login")
 def admin_login(password: str):
@@ -170,6 +182,7 @@ def admin_login(password: str):
     token = str(uuid.uuid4())
     admin_tokens[token] = time.time() + 600
     return {"success": True, "token": token}
+
 
 @app.get("/verify-admin-token")
 def verify_token(token: str):
@@ -181,6 +194,39 @@ def verify_token(token: str):
         return {"allowed": False}
 
     return {"allowed": True}
+
+# =========================================================
+# ADMIN — LISTE DES SIMULATIONS
+# =========================================================
+@app.get("/admin/simulations")
+def admin_simulations(token: str, db: Session = Depends(get_db)):
+
+    if token not in admin_tokens or time.time() > admin_tokens[token]:
+        return {"success": False, "error": "unauthorized"}
+
+    rows = (
+        db.query(Simulation, Client)
+        .join(Client, Client.id == Simulation.client_id)
+        .order_by(Simulation.created_at.desc())
+        .all()
+    )
+
+    data = []
+    for simulation, client in rows:
+        data.append({
+            "simulation_id": simulation.id,
+            "created_at": simulation.created_at.isoformat(),
+            "client": {
+                "prenom": client.prenom,
+                "nom": client.nom,
+                "email": client.email,
+                "telephone": client.telephone,
+            },
+            "donnees": simulation.donnees,
+            "resultat": simulation.resultat
+        })
+
+    return {"success": True, "rows": data}
 
 # =========================================================
 # DEBUG / PING
