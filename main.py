@@ -19,6 +19,14 @@ from models import Base, Client, Simulation
 
 from simulateur_avs_lpp import calcul_complet_retraite
 from pdf_generator import generer_pdf_estimation
+from database import engine
+from models import Base, Simulation
+
+print("⚠️ RESET DB : DROP TABLE simulations")
+
+Simulation.__table__.drop(bind=engine, checkfirst=True)
+
+print("✅ TABLE simulations supprimée")
 
 # =========================================================
 # INITIALISATION DB
