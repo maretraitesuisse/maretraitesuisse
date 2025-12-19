@@ -24,7 +24,7 @@ from models import Base, Simulation
 
 print("⚠️ RESET DB : DROP TABLE simulations")
 
-Simulation.__table__.drop(bind=engine, checkfirst=True)
+
 
 print("✅ TABLE simulations supprimée")
 
