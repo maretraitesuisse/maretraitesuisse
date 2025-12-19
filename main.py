@@ -8,7 +8,6 @@ import time
 import uuid
 import base64
 import requests
-from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, Depends
@@ -27,22 +26,17 @@ from pdf_generator import generer_pdf_estimation
 Base.metadata.create_all(bind=engine)
 
 # =========================================================
-# FASTAPI
+# FASTAPI APP
 # =========================================================
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://maretraitesuisse.ch",
-        "https://www.maretraitesuisse.ch",
-        "https://maretraitesuisse.onrender.com"
-    ],
+    allow_origin_regex=r"https://.*maretraitesuisse\.ch",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # =========================================================
 # CONFIG BREVO
@@ -53,7 +47,6 @@ if not BREVO_API_KEY:
 
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 SENDER = {"email": "noreply@maretraitesuisse.ch", "name": "Ma Retraite Suisse"}
-
 
 def envoyer_email(
     template_id: int,
@@ -91,7 +84,6 @@ def envoyer_email(
 @app.post("/submit")
 def submit(data: dict, db: Session = Depends(get_db)):
 
-    # 1️⃣ CLIENT
     client = db.query(Client).filter(Client.email == data["email"]).first()
 
     if not client:
@@ -105,10 +97,8 @@ def submit(data: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(client)
 
-    # 2️⃣ CALCUL
     resultat = calcul_complet_retraite(data)
 
-    # 3️⃣ SIMULATION (on stocke AUSSI les données d’entrée)
     simulation = Simulation(
         client_id=client.id,
         statut_civil=data.get("statut_civil"),
@@ -122,7 +112,7 @@ def submit(data: dict, db: Session = Depends(get_db)):
         annees_ba=data.get("annees_ba"),
         capital_lpp=data.get("capital_lpp"),
         rente_conjoint=data.get("rente_conjoint"),
-        donnees=data,              # 🔑 IMPORTANT
+        donnees=data,
         resultat=resultat
     )
 
@@ -130,12 +120,7 @@ def submit(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(simulation)
 
-    # 4️⃣ EMAIL CONFIRMATION
-    envoyer_email(
-        template_id=1,
-        email=client.email,
-        prenom=client.prenom
-    )
+    envoyer_email(1, client.email, client.prenom)
 
     return {
         "success": True,
@@ -144,41 +129,10 @@ def submit(data: dict, db: Session = Depends(get_db)):
     }
 
 # =========================================================
-# ROUTE : ENVOI PDF (ADMIN)
-# =========================================================
-@app.post("/envoyer-pdf")
-def envoyer_pdf(simulation_id: int, token: str, db: Session = Depends(get_db)):
-
-    # 🔐 Vérification admin
-    if token not in admin_tokens or time.time() > admin_tokens[token]:
-        return {"success": False, "error": "unauthorized"}
-
-    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
-    if not simulation:
-        return {"success": False, "error": "Simulation introuvable"}
-
-    client = db.query(Client).filter(Client.id == simulation.client_id).first()
-
-    pdf_path = generer_pdf_estimation(
-        simulation.donnees,
-        simulation.resultat
-    )
-
-    envoyer_email(
-        template_id=2,
-        email=client.email,
-        prenom=client.prenom,
-        attachment_path=pdf_path
-    )
-
-    return {"success": True}
-
-# =========================================================
 # ADMIN AUTH
 # =========================================================
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens: dict[str, float] = {}
-
 
 @app.get("/admin-login")
 def admin_login(password: str):
@@ -189,16 +143,13 @@ def admin_login(password: str):
     admin_tokens[token] = time.time() + 600
     return {"success": True, "token": token}
 
-
 @app.get("/verify-admin-token")
 def verify_token(token: str):
     if token not in admin_tokens:
         return {"allowed": False}
-
     if time.time() > admin_tokens[token]:
         del admin_tokens[token]
         return {"allowed": False}
-
     return {"allowed": True}
 
 # =========================================================
@@ -217,30 +168,28 @@ def admin_simulations(token: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    data = []
-    for simulation, client in rows:
-        data.append({
-            "simulation_id": simulation.id,
-            "created_at": simulation.created_at.isoformat(),
-            "client": {
-                "prenom": client.prenom,
-                "nom": client.nom,
-                "email": client.email,
-                "telephone": client.telephone,
-            },
-            "donnees": simulation.donnees,
-            "resultat": simulation.resultat
-        })
-
-    return {"success": True, "rows": data}
+    return {
+        "success": True,
+        "rows": [
+            {
+                "simulation_id": sim.id,
+                "created_at": sim.created_at.isoformat(),
+                "client": {
+                    "prenom": cli.prenom,
+                    "nom": cli.nom,
+                    "email": cli.email,
+                    "telephone": cli.telephone,
+                },
+                "donnees": sim.donnees,
+                "resultat": sim.resultat
+            }
+            for sim, cli in rows
+        ]
+    }
 
 # =========================================================
-# DEBUG / PING
+# PING / DEBUG
 # =========================================================
 @app.get("/ping")
 def ping():
     return {"status": "alive"}
-
-@app.get("/debug/clients")
-def debug_clients(db: Session = Depends(get_db)):
-    return db.query(Client).all()
