@@ -22,12 +22,6 @@ from pdf_generator import generer_pdf_estimation
 from database import engine
 from models import Base, Simulation
 
-print("⚠️ RESET DB : DROP TABLE simulations")
-
-
-
-print("✅ TABLE simulations supprimée")
-
 # =========================================================
 # INITIALISATION DB
 # =========================================================
