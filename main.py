@@ -20,12 +20,9 @@ from simulateur_avs_lpp import calcul_complet_retraite
 from pdf_generator import generer_pdf_estimation
 from database import engine
 
-from routes.avis import router as avis_router
-
-
 from models.models import Base, Client, Simulation
-
-
+from models.avis import Avis
+from routes.avis import router as avis_router
 
 # =========================================================
 # INITIALISATION DB
