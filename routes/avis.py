@@ -1,223 +1,128 @@
-# routes/avis.py
+# =========================================================
+# ROUTES AVIS — BACKEND MARETRAITESUISSE
+# =========================================================
 
-import time
-from datetime import datetime, timezone
-from typing import Optional, List
-
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 from database import get_db
 from models.avis import Avis
 
+# =========================================================
+# ROUTER
+# =========================================================
 
 router = APIRouter()
 
-
 # =========================================================
-# HELPERS
+# PUBLIC — SOUMISSION D’UN AVIS
 # =========================================================
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
 
-
-def _check_admin_token(token: str) -> None:
-    """
-    Utilise EXACTEMENT le même store de tokens que ton main.py
-    (sans import circulaire au démarrage).
-    """
-    try:
-        # Import lazy (au moment de l'appel) pour éviter les boucles
-        from main import admin_tokens  # type: ignore
-    except Exception:
-        raise HTTPException(status_code=500, detail="admin token store unavailable")
-
-    if not token or token not in admin_tokens:
-        raise HTTPException(status_code=401, detail="unauthorized")
-
-    if time.time() > admin_tokens[token]:
-        # token expiré -> purge
-        try:
-            del admin_tokens[token]
-        except Exception:
-            pass
-        raise HTTPException(status_code=401, detail="token expired")
-
-
-def _format_date_fr(d: datetime) -> str:
-    # format demandé: 12/03/2025
-    return d.astimezone(timezone.utc).strftime("%d/%m/%Y")
-
-
-# =========================================================
-# SCHEMAS (Pydantic)
-# =========================================================
-class AvisCreate(BaseModel):
-    prenom: str = Field(..., min_length=1, max_length=60)
-    nom: str = Field(..., min_length=1, max_length=60)
-    email: EmailStr
-    canton: str = Field(..., min_length=2, max_length=60)
-    ville: str = Field(..., min_length=1, max_length=80)
-    note: int = Field(..., ge=1, le=5)
-    message: str = Field(..., min_length=10, max_length=600)
-
-
-class AvisPublicOut(BaseModel):
-    id: int
-    note: int
-    message: str
-    prenom: str
-    nom_initiale: str
-    ville: str
-    published_at: str  # "12/03/2025"
-
-    class Config:
-        from_attributes = True
-
-
-class AvisAdminOut(BaseModel):
-    id: int
-    created_at: str
-    prenom: str
-    nom: str
-    email: str
-    canton: str
-    ville: str
-    note: int
-    message: str
-
-    class Config:
-        from_attributes = True
-
-
-# =========================================================
-# ROUTES — PUBLIC
-# =========================================================
 @router.post("/submit")
-def submit_avis(payload: AvisCreate, db: Session = Depends(get_db)):
+def submit_avis(data: dict, db: Session = Depends(get_db)):
     """
-    Crée un avis en attente de validation (pending).
+    Réception d’un avis client (non publié par défaut)
     """
+
     avis = Avis(
-        prenom=payload.prenom.strip(),
-        nom=payload.nom.strip(),
-        email=str(payload.email).strip().lower(),
-        canton=payload.canton.strip(),
-        ville=payload.ville.strip(),
-        note=int(payload.note),
-        message=payload.message.strip(),
-        status="pending",
+        prenom=data["prenom"],
+        nom=data["nom"],
+        email=data["email"],
+        canton=data.get("canton"),
+        ville=data.get("ville"),
+        note=int(data["note"]),
+        message=data["message"],
         is_published=False,
-        created_at=_now_utc(),
-        published_at=None,
     )
 
     db.add(avis)
     db.commit()
     db.refresh(avis)
 
-    return {"success": True, "message": "avis received"}
+    return {
+        "success": True,
+        "message": "Avis reçu avec succès"
+    }
 
+# =========================================================
+# PUBLIC — AVIS PUBLIÉS
+# =========================================================
 
-@router.get("/published", response_model=List[AvisPublicOut])
-def list_published(db: Session = Depends(get_db)):
+@router.get("/published")
+def get_published_avis(db: Session = Depends(get_db)):
     """
-    Liste publique : uniquement les avis publiés, du plus récent au plus ancien.
+    Liste des avis validés (affichage site)
     """
-    rows = (
+
+    avis = (
         db.query(Avis)
-        .filter(Avis.is_published == True)  # noqa: E712
+        .filter(Avis.is_published == True)
         .order_by(Avis.published_at.desc())
         .all()
     )
 
-    out: List[AvisPublicOut] = []
-    for a in rows:
-        nom_initiale = (a.nom[:1].upper() + ".") if a.nom else ""
-        published_at = _format_date_fr(a.published_at or a.created_at)
-
-        out.append(
-            AvisPublicOut(
-                id=a.id,
-                note=a.note,
-                message=a.message,
-                prenom=a.prenom,
-                nom_initiale=nom_initiale,
-                ville=a.ville,
-                published_at=published_at,
-            )
-        )
-
-    return out
-
+    return [
+        {
+            "id": a.id,
+            "prenom": a.prenom,
+            "nom": a.nom[0] + ".",  # anonymisation
+            "note": a.note,
+            "message": a.message,
+            "canton": a.canton,
+            "ville": a.ville,
+            "published_at": a.published_at.strftime("%d/%m/%Y") if a.published_at else None,
+        }
+        for a in avis
+    ]
 
 # =========================================================
-# ROUTES — ADMIN
+# ADMIN — AVIS EN ATTENTE
 # =========================================================
-@router.get("/admin/pending", response_model=List[AvisAdminOut])
-def admin_list_pending(token: str, db: Session = Depends(get_db)):
-    """
-    Liste admin : avis en attente (pending).
-    """
-    _check_admin_token(token)
 
-    rows = (
+@router.get("/admin/pending")
+def get_pending_avis(db: Session = Depends(get_db)):
+    """
+    Avis reçus mais non publiés (admin)
+    """
+
+    avis = (
         db.query(Avis)
-        .filter(Avis.is_published == False)  # noqa: E712
+        .filter(Avis.is_published == False)
         .order_by(Avis.created_at.desc())
         .all()
     )
 
-    out: List[AvisAdminOut] = []
-    for a in rows:
-        out.append(
-            AvisAdminOut(
-                id=a.id,
-                created_at=_format_date_fr(a.created_at),
-                prenom=a.prenom,
-                nom=a.nom,
-                email=a.email,
-                canton=a.canton,
-                ville=a.ville,
-                note=a.note,
-                message=a.message,
-            )
-        )
-    return out
+    return avis
 
+# =========================================================
+# ADMIN — PUBLIER UN AVIS
+# =========================================================
 
 @router.post("/admin/{avis_id}/publish")
-def admin_publish(avis_id: int, token: str, db: Session = Depends(get_db)):
-    """
-    Publie un avis : il apparaîtra immédiatement côté public.
-    """
-    _check_admin_token(token)
-
+def publish_avis(avis_id: int, db: Session = Depends(get_db)):
     avis = db.query(Avis).filter(Avis.id == avis_id).first()
+
     if not avis:
-        raise HTTPException(status_code=404, detail="avis not found")
+        return {"success": False, "error": "Avis introuvable"}
 
     avis.is_published = True
-    avis.status = "published"
-    avis.published_at = _now_utc()
+    avis.published_at = datetime.utcnow()
 
-    db.add(avis)
     db.commit()
 
     return {"success": True}
 
+# =========================================================
+# ADMIN — SUPPRIMER UN AVIS
+# =========================================================
 
 @router.delete("/admin/{avis_id}")
-def admin_delete(avis_id: int, token: str, db: Session = Depends(get_db)):
-    """
-    Refuser / supprimer définitivement un avis (comme demandé).
-    """
-    _check_admin_token(token)
-
+def delete_avis(avis_id: int, db: Session = Depends(get_db)):
     avis = db.query(Avis).filter(Avis.id == avis_id).first()
+
     if not avis:
-        raise HTTPException(status_code=404, detail="avis not found")
+        return {"success": False, "error": "Avis introuvable"}
 
     db.delete(avis)
     db.commit()
