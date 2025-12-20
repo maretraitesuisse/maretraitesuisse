@@ -15,12 +15,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from database import engine, get_db
-from models import Base, Client, Simulation
 
 from simulateur_avs_lpp import calcul_complet_retraite
 from pdf_generator import generer_pdf_estimation
 from database import engine
-from models import Base, Simulation
+
+from routes_avis import router as avis_router
+
+from models.models import Base, Client, Simulation
+from models.avis import Avis
+
 
 # =========================================================
 # INITIALISATION DB
@@ -141,6 +145,14 @@ def submit(data: dict, db: Session = Depends(get_db)):
 # =========================================================
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens: dict[str, float] = {}
+
+# 👉 injection simple pour routes_avis (même dict, même source de vérité)
+app.include_router(
+    avis_router,
+    prefix="/api/avis",
+    dependencies=[],
+)
+
 
 @app.get("/admin-login")
 def admin_login(password: str):
