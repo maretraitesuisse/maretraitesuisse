@@ -9,10 +9,6 @@ from datetime import datetime
 from database import get_db
 from models.avis import Avis
 
-# =========================================================
-# ROUTER
-# =========================================================
-
 router = APIRouter()
 
 # =========================================================
@@ -21,19 +17,15 @@ router = APIRouter()
 
 @router.post("/submit")
 def submit_avis(data: dict, db: Session = Depends(get_db)):
-    """
-    Réception d’un avis client (non publié par défaut)
-    """
-
     avis = Avis(
         prenom=data["prenom"],
         nom=data["nom"],
         email=data["email"],
-        canton=data.get("canton"),
-        ville=data.get("ville"),
+        canton=data["canton"],
+        ville=data["ville"],
         note=int(data["note"]),
-        message=data["message"],
-        is_published=False,
+        commentaire=data["commentaire"],
+        published=False,
     )
 
     db.add(avis)
@@ -42,7 +34,7 @@ def submit_avis(data: dict, db: Session = Depends(get_db)):
 
     return {
         "success": True,
-        "message": "Avis reçu avec succès"
+        "message": "Votre avis a bien été reçu. Il sera publié après validation."
     }
 
 # =========================================================
@@ -51,13 +43,9 @@ def submit_avis(data: dict, db: Session = Depends(get_db)):
 
 @router.get("/published")
 def get_published_avis(db: Session = Depends(get_db)):
-    """
-    Liste des avis validés (affichage site)
-    """
-
     avis = (
         db.query(Avis)
-        .filter(Avis.is_published == True)
+        .filter(Avis.published == True)
         .order_by(Avis.published_at.desc())
         .all()
     )
@@ -66,9 +54,9 @@ def get_published_avis(db: Session = Depends(get_db)):
         {
             "id": a.id,
             "prenom": a.prenom,
-            "nom": a.nom[0] + ".",  # anonymisation
+            "nom": a.nom[0] + ".",
             "note": a.note,
-            "message": a.message,
+            "commentaire": a.commentaire,
             "canton": a.canton,
             "ville": a.ville,
             "published_at": a.published_at.strftime("%d/%m/%Y") if a.published_at else None,
@@ -82,18 +70,12 @@ def get_published_avis(db: Session = Depends(get_db)):
 
 @router.get("/admin/pending")
 def get_pending_avis(db: Session = Depends(get_db)):
-    """
-    Avis reçus mais non publiés (admin)
-    """
-
-    avis = (
+    return (
         db.query(Avis)
-        .filter(Avis.is_published == False)
+        .filter(Avis.published == False)
         .order_by(Avis.created_at.desc())
         .all()
     )
-
-    return avis
 
 # =========================================================
 # ADMIN — PUBLIER UN AVIS
@@ -106,7 +88,7 @@ def publish_avis(avis_id: int, db: Session = Depends(get_db)):
     if not avis:
         return {"success": False, "error": "Avis introuvable"}
 
-    avis.is_published = True
+    avis.published = True
     avis.published_at = datetime.utcnow()
 
     db.commit()

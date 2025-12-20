@@ -20,5 +20,6 @@ class Avis(Base):
     commentaire = Column(Text, nullable=False)
 
     published = Column(Boolean, default=False)
+    published_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
