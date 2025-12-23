@@ -37,16 +37,12 @@ app = FastAPI()
 # =========================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://maretraitesuisse.ch",
-        "https://www.maretraitesuisse.ch",
-        "https://admin.shopify.com",
-    ],
-    allow_origin_regex=r"https://.*\.myshopify\.com",
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # =========================================================
 # CONFIG BREVO
