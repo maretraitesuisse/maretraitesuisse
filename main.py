@@ -33,7 +33,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 # =========================================================
-# CORS — FIX PRODUCTION (SHOPIFY + SITE)
+# CORS — TEMPORAIRE (DEBUG)
 # =========================================================
 app.add_middleware(
     CORSMiddleware,
@@ -42,7 +42,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # =========================================================
 # CONFIG BREVO
@@ -91,8 +90,39 @@ def envoyer_email(
 # ROUTE : SUBMIT FORMULAIRE
 # =========================================================
 @app.post("/submit")
-def submit(data: dict, db: Session = Depends(get_db)):
+def submit(payload: dict, db: Session = Depends(get_db)):
 
+    # =====================================================
+    # 🔄 NORMALISATION FRONT (camelCase) → BACK (snake_case)
+    # =====================================================
+    data = {
+        "prenom": payload.get("prenom"),
+        "nom": payload.get("nom"),
+        "email": payload.get("email"),
+        "telephone": payload.get("telephone"),
+
+        "statut_civil": payload.get("statutCivil"),
+        "statut_pro": payload.get("statutPro"),
+
+        "age_actuel": payload.get("ageActuel"),
+        "age_retraite": payload.get("ageRetraite"),
+
+        "salaire_actuel": payload.get("salaireActuel"),
+        "salaire_moyen": payload.get("salaireMoyen"),
+
+        "annees_cotisees": payload.get("anneesCotisees"),
+
+        "capital_lpp": payload.get("capitalLPP"),
+        "rente_conjoint": payload.get("renteConjoint"),
+
+        # valeurs optionnelles
+        "annees_be": payload.get("annees_be", 0),
+        "annees_ba": payload.get("annees_ba", 0),
+    }
+
+    # =====================================================
+    # CLIENT
+    # =====================================================
     client = db.query(Client).filter(Client.email == data["email"]).first()
 
     if not client:
@@ -106,9 +136,14 @@ def submit(data: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(client)
 
-    # 🧮 CALCUL MÉTIER
+    # =====================================================
+    # 🧮 CALCUL MÉTIER (AVS + LPP)
+    # =====================================================
     resultat = calcul_complet_retraite(data)
 
+    # =====================================================
+    # SAUVEGARDE SIMULATION
+    # =====================================================
     simulation = Simulation(
         client_id=client.id,
         statut_civil=data.get("statut_civil"),
@@ -130,10 +165,14 @@ def submit(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(simulation)
 
-    # 📧 EMAIL CONFIRMATION (inchangé)
+    # =====================================================
+    # 📧 EMAIL CONFIRMATION
+    # =====================================================
     envoyer_email(1, client.email, client.prenom)
 
-    # ⚠️ IMPORTANT : on retourne BIEN les résultats
+    # =====================================================
+    # RÉPONSE FRONTEND
+    # =====================================================
     return {
         "success": True,
         "simulation_id": simulation.id,
