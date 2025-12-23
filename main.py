@@ -15,13 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from database import engine, get_db
-
 from simulateur_avs_lpp import calcul_complet_retraite
 from pdf_generator import generer_pdf_estimation
 
 from models.models import Base, Client, Simulation
 from models.avis import Avis
-
 from routes.avis import router as avis_router
 
 # =========================================================
@@ -29,25 +27,26 @@ from routes.avis import router as avis_router
 # =========================================================
 Base.metadata.create_all(bind=engine)
 
-
 # =========================================================
 # FASTAPI APP
 # =========================================================
 app = FastAPI()
 
+# =========================================================
+# CORS — FIX PRODUCTION (SHOPIFY + SITE)
+# =========================================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://maretraitesuisse.ch",
         "https://www.maretraitesuisse.ch",
         "https://admin.shopify.com",
-        "https://*.myshopify.com",
     ],
+    allow_origin_regex=r"https://.*\.myshopify\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # =========================================================
 # CONFIG BREVO
@@ -57,7 +56,10 @@ if not BREVO_API_KEY:
     raise Exception("BREVO_API_KEY manquant")
 
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
-SENDER = {"email": "noreply@maretraitesuisse.ch", "name": "Ma Retraite Suisse"}
+SENDER = {
+    "email": "noreply@maretraitesuisse.ch",
+    "name": "Ma Retraite Suisse"
+}
 
 def envoyer_email(
     template_id: int,
@@ -108,6 +110,7 @@ def submit(data: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(client)
 
+    # 🧮 CALCUL MÉTIER
     resultat = calcul_complet_retraite(data)
 
     simulation = Simulation(
@@ -131,8 +134,10 @@ def submit(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(simulation)
 
+    # 📧 EMAIL CONFIRMATION (inchangé)
     envoyer_email(1, client.email, client.prenom)
 
+    # ⚠️ IMPORTANT : on retourne BIEN les résultats
     return {
         "success": True,
         "simulation_id": simulation.id,
@@ -145,13 +150,14 @@ def submit(data: dict, db: Session = Depends(get_db)):
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
 admin_tokens: dict[str, float] = {}
 
-# 👉 injection simple pour routes_avis (même dict, même source de vérité)
+# =========================================================
+# ROUTES AVIS
+# =========================================================
 app.include_router(
     avis_router,
     prefix="/api/avis",
     dependencies=[],
 )
-
 
 @app.get("/admin-login")
 def admin_login(password: str):
