@@ -96,29 +96,29 @@ def submit(payload: dict, db: Session = Depends(get_db)):
     # 🔄 NORMALISATION FRONT (camelCase) → BACK (snake_case)
     # =====================================================
     data = {
-        "prenom": payload.get("prenom"),
-        "nom": payload.get("nom"),
-        "email": payload.get("email"),
-        "telephone": payload.get("telephone"),
+    "prenom": payload.get("prenom"),
+    "nom": payload.get("nom"),
+    "email": payload.get("email"),
+    "telephone": payload.get("telephone"),
 
-        "statut_civil": payload.get("statutCivil"),
-        "statut_pro": payload.get("statutPro"),
+    "statut_civil": payload.get("statutCivil"),
+    "statut_pro": payload.get("statutPro"),
 
-        "age_actuel": payload.get("ageActuel"),
-        "age_retraite": payload.get("ageRetraite"),
+    "age_actuel": payload.get("ageActuel") or 0,
+    "age_retraite": payload.get("ageRetraite") or 0,
 
-        "salaire_actuel": payload.get("salaireActuel"),
-        "salaire_moyen": payload.get("salaireMoyen"),
+    "salaire_actuel": payload.get("salaireActuel") or 0,
+    "salaire_moyen": payload.get("salaireMoyen") or 0,
 
-        "annees_cotisees": payload.get("anneesCotisees"),
+    "annees_cotisees": payload.get("anneesCotisees") or 0,
 
-        "capital_lpp": payload.get("capitalLPP"),
-        "rente_conjoint": payload.get("renteConjoint"),
+    "capital_lpp": payload.get("capitalLPP") or 0,
+    "rente_conjoint": payload.get("renteConjoint") or 0,
 
-        # valeurs optionnelles
-        "annees_be": payload.get("annees_be", 0),
-        "annees_ba": payload.get("annees_ba", 0),
-    }
+    "annees_be": payload.get("annees_be") or 0,
+    "annees_ba": payload.get("annees_ba") or 0,
+}
+
 
     # =====================================================
     # CLIENT
