@@ -16,10 +16,7 @@ from sqlalchemy.orm import Session
 
 from database import engine, get_db
 from simulateur_avs_lpp import calcul_complet_retraite
-from pdf_generator import generer_pdf_estimation
-
 from models.models import Base, Client, Simulation
-from models.avis import Avis
 from routes.avis import router as avis_router
 
 # =========================================================
@@ -33,7 +30,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 # =========================================================
-# CORS — TEMPORAIRE (DEBUG)
+# CORS
 # =========================================================
 app.add_middleware(
     CORSMiddleware,
@@ -47,34 +44,20 @@ app.add_middleware(
 # CONFIG BREVO
 # =========================================================
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-if not BREVO_API_KEY:
-    raise Exception("BREVO_API_KEY manquant")
-
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+
 SENDER = {
     "email": "noreply@maretraitesuisse.ch",
     "name": "Ma Retraite Suisse"
 }
 
-def envoyer_email(
-    template_id: int,
-    email: str,
-    prenom: str,
-    attachment_path: Optional[str] = None
-):
+def envoyer_email(template_id: int, email: str, prenom: str):
     payload = {
         "templateId": template_id,
         "to": [{"email": email}],
         "params": {"prenom": prenom},
         "sender": SENDER
     }
-
-    if attachment_path:
-        with open(attachment_path, "rb") as f:
-            payload["attachment"] = [{
-                "name": "estimation_retraite.pdf",
-                "content": base64.b64encode(f.read()).decode()
-            }]
 
     requests.post(
         BREVO_URL,
@@ -87,43 +70,39 @@ def envoyer_email(
     )
 
 # =========================================================
-# ROUTE : SUBMIT FORMULAIRE
+# ROUTE : SUBMIT
 # =========================================================
 @app.post("/submit")
 def submit(payload: dict, db: Session = Depends(get_db)):
 
     # =====================================================
-    # 🔄 NORMALISATION FRONT (camelCase) → BACK (snake_case)
+    # NORMALISATION PAYLOAD (ALIGNÉ FRONT)
     # =====================================================
     data = {
-    "prenom": payload.get("prenom"),
-    "nom": payload.get("nom"),
-    "email": payload.get("email"),
-    "telephone": payload.get("telephone"),
+        "prenom": payload.get("prenom"),
+        "nom": payload.get("nom"),
+        "email": payload.get("email"),
+        "telephone": payload.get("telephone"),
 
-    # ✅ snake_case (aligné avec le front)
-    "statut_civil": payload.get("statut_civil"),
-    "statut_pro": payload.get("statut_pro"),
+        "statut_civil": payload.get("statut_civil"),
+        "statut_pro": payload.get("statut_pro"),
 
-    "age_actuel": payload.get("age_actuel", 0),
-    "age_retraite": payload.get("age_retraite", 0),
+        "age_actuel": int(payload.get("age_actuel", 0)),
+        "age_retraite": int(payload.get("age_retraite", 0)),
 
-    "salaire_actuel": payload.get("salaire_actuel", 0),
-    "salaire_moyen_avs": payload.get("salaire_moyen_avs", 0),
+        "salaire_actuel": float(payload.get("salaire_actuel", 0)),
+        "salaire_moyen_avs": float(payload.get("salaire_moyen_avs", 0)),
 
-    "annees_avs": payload.get("annees_avs", 0),
-    "annees_be": payload.get("annees_be", 0),
-    "annees_ba": payload.get("annees_ba", 0),
+        "annees_avs": int(payload.get("annees_avs", 0)),
+        "annees_be": int(payload.get("annees_be", 0)),
+        "annees_ba": int(payload.get("annees_ba", 0)),
 
-    "capital_lpp": payload.get("capital_lpp", 0),
-    "rente_conjoint": payload.get("rente_conjoint", 0),
+        "capital_lpp": float(payload.get("capital_lpp", 0)),
+        "rente_conjoint": float(payload.get("rente_conjoint", 0)),
 
-    "has_3eme_pilier": payload.get("has_3eme_pilier"),
-    "type_3eme_pilier": payload.get("type_3eme_pilier"),
-}
-
-
-
+        "has_3eme_pilier": payload.get("has_3eme_pilier"),
+        "type_3eme_pilier": payload.get("type_3eme_pilier"),
+    }
 
     # =====================================================
     # CLIENT
@@ -135,33 +114,35 @@ def submit(payload: dict, db: Session = Depends(get_db)):
             prenom=data["prenom"],
             nom=data["nom"],
             email=data["email"],
-            telephone=data.get("telephone")
+            telephone=data["telephone"]
         )
         db.add(client)
         db.commit()
         db.refresh(client)
 
     # =====================================================
-    # 🧮 CALCUL MÉTIER (AVS + LPP)
+    # CALCUL MÉTIER
     # =====================================================
     resultat = calcul_complet_retraite(data)
 
     # =====================================================
-    # SAUVEGARDE SIMULATION
+    # SAUVEGARDE SIMULATION (ALIGNÉ DB)
     # =====================================================
     simulation = Simulation(
         client_id=client.id,
-        statut_civil=data.get("statut_civil"),
-        statut_pro=data.get("statut_pro"),
-        age_actuel=data.get("age_actuel"),
-        age_retraite=data.get("age_retraite"),
-        salaire_actuel=data.get("salaire_actuel"),
-        salaire_moyen=data.get("salaire_moyen"),
-        annees_cotisees=data.get("annees_cotisees"),
-        annees_be=data.get("annees_be"),
-        annees_ba=data.get("annees_ba"),
-        capital_lpp=data.get("capital_lpp"),
-        rente_conjoint=data.get("rente_conjoint"),
+        statut_civil=data["statut_civil"],
+        statut_pro=data["statut_pro"],
+        age_actuel=data["age_actuel"],
+        age_retraite=data["age_retraite"],
+        salaire_actuel=data["salaire_actuel"],
+        salaire_moyen_avs=data["salaire_moyen_avs"],
+        annees_avs=data["annees_avs"],
+        annees_be=data["annees_be"],
+        annees_ba=data["annees_ba"],
+        capital_lpp=data["capital_lpp"],
+        rente_conjoint=data["rente_conjoint"],
+        has_3eme_pilier=data["has_3eme_pilier"],
+        type_3eme_pilier=data["type_3eme_pilier"],
         donnees=data,
         resultat=resultat
     )
@@ -171,13 +152,10 @@ def submit(payload: dict, db: Session = Depends(get_db)):
     db.refresh(simulation)
 
     # =====================================================
-    # 📧 EMAIL CONFIRMATION
+    # EMAIL
     # =====================================================
     envoyer_email(1, client.email, client.prenom)
 
-    # =====================================================
-    # RÉPONSE FRONTEND
-    # =====================================================
     return {
         "success": True,
         "simulation_id": simulation.id,
@@ -185,75 +163,12 @@ def submit(payload: dict, db: Session = Depends(get_db)):
     }
 
 # =========================================================
-# ADMIN AUTH
-# =========================================================
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ADMIN123")
-admin_tokens: dict[str, float] = {}
-
-# =========================================================
 # ROUTES AVIS
 # =========================================================
-app.include_router(
-    avis_router,
-    prefix="/api/avis",
-    dependencies=[],
-)
-
-@app.get("/admin-login")
-def admin_login(password: str):
-    if password != ADMIN_PASSWORD:
-        return {"success": False}
-
-    token = str(uuid.uuid4())
-    admin_tokens[token] = time.time() + 600
-    return {"success": True, "token": token}
-
-@app.get("/verify-admin-token")
-def verify_token(token: str):
-    if token not in admin_tokens:
-        return {"allowed": False}
-    if time.time() > admin_tokens[token]:
-        del admin_tokens[token]
-        return {"allowed": False}
-    return {"allowed": True}
+app.include_router(avis_router, prefix="/api/avis")
 
 # =========================================================
-# ADMIN — LISTE DES SIMULATIONS
-# =========================================================
-@app.get("/admin/simulations")
-def admin_simulations(token: str, db: Session = Depends(get_db)):
-
-    if token not in admin_tokens or time.time() > admin_tokens[token]:
-        return {"success": False, "error": "unauthorized"}
-
-    rows = (
-        db.query(Simulation, Client)
-        .join(Client, Client.id == Simulation.client_id)
-        .order_by(Simulation.created_at.desc())
-        .all()
-    )
-
-    return {
-        "success": True,
-        "rows": [
-            {
-                "simulation_id": sim.id,
-                "created_at": sim.created_at.isoformat(),
-                "client": {
-                    "prenom": cli.prenom,
-                    "nom": cli.nom,
-                    "email": cli.email,
-                    "telephone": cli.telephone,
-                },
-                "donnees": sim.donnees,
-                "resultat": sim.resultat
-            }
-            for sim, cli in rows
-        ]
-    }
-
-# =========================================================
-# PING / DEBUG
+# PING
 # =========================================================
 @app.get("/ping")
 def ping():
