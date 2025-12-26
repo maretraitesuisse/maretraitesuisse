@@ -93,7 +93,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         "salaire_actuel": float(payload.get("salaire_actuel", 0)),
         "salaire_moyen": float(payload.get("salaire_moyen", 0)),
 
-        "annees_avs": int(payload.get("annees_avs", 0)),
+        "annees_cotisees": int(payload.get("annees_cotisees", 0)),
         "annees_be": int(payload.get("annees_be", 0)),
         "annees_ba": int(payload.get("annees_ba", 0)),
 
@@ -129,27 +129,36 @@ def submit(payload: dict, db: Session = Depends(get_db)):
     # SAUVEGARDE SIMULATION (ALIGNÉ DB)
     # =====================================================
     simulation = Simulation(
-        client_id=client.id,
-        statut_civil=data["statut_civil"],
-        statut_pro=data["statut_pro"],
-        age_actuel=data["age_actuel"],
-        age_retraite=data["age_retraite"],
-        salaire_actuel=data["salaire_actuel"],
-        salaire_moyen=data["salaire_moyen"],
-        annees_avs=data["annees_avs"],
-        annees_be=data["annees_be"],
-        annees_ba=data["annees_ba"],
-        capital_lpp=data["capital_lpp"],
-        rente_conjoint=data["rente_conjoint"],
-        has_3eme_pilier=data["has_3eme_pilier"],
-        type_3eme_pilier=data["type_3eme_pilier"],
-        donnees=data,
-        resultat=resultat
-    )
+    client_id=client.id,
 
-    db.add(simulation)
-    db.commit()
-    db.refresh(simulation)
+    statut_civil=data.get("statut_civil"),
+    statut_pro=data.get("statut_pro"),
+
+    age_actuel=data.get("age_actuel"),
+    age_retraite=data.get("age_retraite"),
+
+    salaire_actuel=data.get("salaire_actuel"),
+    salaire_moyen=data.get("salaire_moyen"),
+
+    annees_cotisees=data.get("annees_cotisees"),  # ✅ CORRIGÉ
+    annees_be=data.get("annees_be"),
+    annees_ba=data.get("annees_ba"),
+
+    capital_lpp=data.get("capital_lpp"),
+    rente_conjoint=data.get("rente_conjoint"),
+
+    has_3eme_pilier=data.get("has_3eme_pilier"),
+    type_3eme_pilier=data.get("type_3eme_pilier"),
+
+    donnees=data,
+    resultat=resultat
+)
+
+db.add(simulation)
+db.commit()
+db.refresh(simulation)
+
+
 
     # =====================================================
     # EMAIL
