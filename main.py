@@ -101,22 +101,27 @@ def submit(payload: dict, db: Session = Depends(get_db)):
     "email": payload.get("email"),
     "telephone": payload.get("telephone"),
 
+    # ✅ snake_case (aligné avec le front)
     "statut_civil": payload.get("statut_civil"),
     "statut_pro": payload.get("statut_pro"),
 
-    "age_actuel": int(payload.get("age_actuel", 0)),
-    "age_retraite": int(payload.get("age_retraite", 0)),
+    "age_actuel": payload.get("age_actuel", 0),
+    "age_retraite": payload.get("age_retraite", 0),
 
-    "salaire_actuel": float(payload.get("salaire_actuel", 0)),
-    "salaire_moyen_avs": float(payload.get("salaire_moyen_avs", 0)),
+    "salaire_actuel": payload.get("salaire_actuel", 0),
+    "salaire_moyen_avs": payload.get("salaire_moyen_avs", 0),
 
-    "annees_avs": int(payload.get("annees_avs", 0)),
-    "annees_be": int(payload.get("annees_be", 0)),
-    "annees_ba": int(payload.get("annees_ba", 0)),
+    "annees_avs": payload.get("annees_avs", 0),
+    "annees_be": payload.get("annees_be", 0),
+    "annees_ba": payload.get("annees_ba", 0),
 
-    "capital_lpp": float(payload.get("capital_lpp", 0)),
-    "rente_conjoint": float(payload.get("rente_conjoint", 0)),
+    "capital_lpp": payload.get("capital_lpp", 0),
+    "rente_conjoint": payload.get("rente_conjoint", 0),
+
+    "has_3eme_pilier": payload.get("has_3eme_pilier"),
+    "type_3eme_pilier": payload.get("type_3eme_pilier"),
 }
+
 
 
 
