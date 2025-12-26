@@ -91,7 +91,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         "age_retraite": int(payload.get("age_retraite", 0)),
 
         "salaire_actuel": float(payload.get("salaire_actuel", 0)),
-        "salaire_moyen_avs": float(payload.get("salaire_moyen_avs", 0)),
+        "salaire_moyen": float(payload.get("salaire_moyen", 0)),
 
         "annees_avs": int(payload.get("annees_avs", 0)),
         "annees_be": int(payload.get("annees_be", 0)),
@@ -135,7 +135,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         age_actuel=data["age_actuel"],
         age_retraite=data["age_retraite"],
         salaire_actuel=data["salaire_actuel"],
-        salaire_moyen_avs=data["salaire_moyen_avs"],
+        salaire_moyen=data["salaire_moyen_avs"],
         annees_avs=data["annees_avs"],
         annees_be=data["annees_be"],
         annees_ba=data["annees_ba"],
