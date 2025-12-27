@@ -4,12 +4,13 @@ from sqlalchemy import (
     String,
     Numeric,
     ForeignKey,
-    DateTime
+    DateTime,
+    Boolean,
+    Text
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from database import Base
-
 
 # =========================================================
 # CLIENT
@@ -35,14 +36,8 @@ class Simulation(Base):
     __tablename__ = "simulations"
 
     id = Column(Integer, primary_key=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
 
-    client_id = Column(
-        Integer,
-        ForeignKey("clients.id", ondelete="CASCADE"),
-        nullable=False
-    )
-
-    # --- Données déclaratives ---
     statut_civil = Column(String)
     statut_pro = Column(String)
 
@@ -59,10 +54,11 @@ class Simulation(Base):
     capital_lpp = Column(Numeric)
     rente_conjoint = Column(Numeric)
 
-    # --- 🔑 DONNÉES COMPLÈTES ENTRÉES (MANQUAIT) ---
-    donnees = Column(JSONB, nullable=False)
+    has_3eme_pilier = Column(Boolean)
+    type_3eme_pilier = Column(Text)
 
-    # --- Résultat du moteur AVS/LPP ---
-    resultat = Column(JSONB, nullable=False)
+    # ✅ JSONB (IMPORTANT)
+    donnees = Column(JSONB)
+    resultat = Column(JSONB)
 
     created_at = Column(DateTime, server_default=func.now())
