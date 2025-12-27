@@ -75,9 +75,6 @@ def envoyer_email(template_id: int, email: str, prenom: str):
 @app.post("/submit")
 def submit(payload: dict, db: Session = Depends(get_db)):
 
-    # =====================================================
-    # NORMALISATION PAYLOAD (ALIGNÉ FRONT)
-    # =====================================================
     data = {
         "prenom": payload.get("prenom"),
         "nom": payload.get("nom"),
@@ -104,11 +101,8 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         "type_3eme_pilier": payload.get("type_3eme_pilier"),
     }
 
-    # =====================================================
     # CLIENT
-    # =====================================================
     client = db.query(Client).filter(Client.email == data["email"]).first()
-
     if not client:
         client = Client(
             prenom=data["prenom"],
@@ -120,49 +114,34 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(client)
 
-    # =====================================================
-    # CALCUL MÉTIER
-    # =====================================================
+    # CALCUL
     resultat = calcul_complet_retraite(data)
 
-    # =====================================================
-    # SAUVEGARDE SIMULATION (ALIGNÉ DB)
-    # =====================================================
+    # SIMULATION
     simulation = Simulation(
-    client_id=client.id,
+        client_id=client.id,
+        statut_civil=data["statut_civil"],
+        statut_pro=data["statut_pro"],
+        age_actuel=data["age_actuel"],
+        age_retraite=data["age_retraite"],
+        salaire_actuel=data["salaire_actuel"],
+        salaire_moyen=data["salaire_moyen"],
+        annees_cotisees=data["annees_cotisees"],
+        annees_be=data["annees_be"],
+        annees_ba=data["annees_ba"],
+        capital_lpp=data["capital_lpp"],
+        rente_conjoint=data["rente_conjoint"],
+        has_3eme_pilier=data["has_3eme_pilier"],
+        type_3eme_pilier=data["type_3eme_pilier"],
+        donnees=data,
+        resultat=resultat
+    )
 
-    statut_civil=data.get("statut_civil"),
-    statut_pro=data.get("statut_pro"),
+    db.add(simulation)
+    db.commit()
+    db.refresh(simulation)
 
-    age_actuel=data.get("age_actuel"),
-    age_retraite=data.get("age_retraite"),
-
-    salaire_actuel=data.get("salaire_actuel"),
-    salaire_moyen=data.get("salaire_moyen"),
-
-    annees_cotisees=data.get("annees_cotisees"),  # ✅ CORRIGÉ
-    annees_be=data.get("annees_be"),
-    annees_ba=data.get("annees_ba"),
-
-    capital_lpp=data.get("capital_lpp"),
-    rente_conjoint=data.get("rente_conjoint"),
-
-    has_3eme_pilier=data.get("has_3eme_pilier"),
-    type_3eme_pilier=data.get("type_3eme_pilier"),
-
-    donnees=data,
-    resultat=resultat
-)
-
-db.add(simulation)
-db.commit()
-db.refresh(simulation)
-
-
-
-    # =====================================================
-    # EMAIL
-    # =====================================================
+    # EMAIL (⬅️ INDENTATION CORRECTE)
     envoyer_email(1, client.email, client.prenom)
 
     return {
