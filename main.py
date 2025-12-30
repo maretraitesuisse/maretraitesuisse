@@ -84,22 +84,23 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         "statut_civil": payload.get("statut_civil"),
         "statut_pro": payload.get("statut_pro"),
 
-        "age_actuel": int(payload.get("age_actuel", 0)),
-        "age_retraite": int(payload.get("age_retraite", 0)),
+        "age_actuel": int(payload.get("age_actuel") or 0),
+        "age_retraite": int(payload.get("age_retraite") or 0),
 
-        "salaire_actuel": float(payload.get("salaire_actuel", 0)),
-        "salaire_moyen": float(payload.get("salaire_moyen", 0)),
+        "salaire_actuel": float(payload.get("salaire_actuel") or 0),
+        "salaire_moyen": float(payload.get("salaire_moyen") or 0),
 
-        "annees_cotisees": int(payload.get("annees_cotisees", 0)),
-        "annees_be": int(payload.get("annees_be", 0)),
-        "annees_ba": int(payload.get("annees_ba", 0)),
+        "annees_cotisees": int(payload.get("annees_cotisees") or 0),
+        "annees_be": int(payload.get("annees_be") or 0),
+        "annees_ba": int(payload.get("annees_ba") or 0),
 
-        "capital_lpp": float(payload.get("capital_lpp", 0)),
-        "rente_conjoint": float(payload.get("rente_conjoint", 0)),
+        "capital_lpp": float(payload.get("capital_lpp") or 0),
+        "rente_conjoint": float(payload.get("rente_conjoint") or 0),
 
         "has_3eme_pilier": payload.get("has_3eme_pilier"),
         "type_3eme_pilier": payload.get("type_3eme_pilier"),
     }
+
 
     # CLIENT
     client = db.query(Client).filter(Client.email == data["email"]).first()
