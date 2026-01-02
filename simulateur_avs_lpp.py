@@ -12,7 +12,7 @@ from typing import Dict
 AVS_RENTE_MAX = 2520
 AVS_RENTE_MIN = 1260
 AVS_RENTE_MEDIANE = 1890
-
+LPP_REFERENCE_MENSUELLE = 1500  # rente mensuelle LPP "saine" de référence
 RAMD_MAX = 90720
 CARRIERE_PLEINE = 44
 REDUCTION_PAR_ANNEE = 0.0227  # 2.27%
@@ -192,11 +192,22 @@ def calcul_complet_retraite(donnees: Dict) -> Dict:
             rente_avs -= excedent * ratio
             rente_conjoint -= excedent * (1 - ratio)
 
-    # ===== PRÉPAIEMENT =====
+        # ===== PRÉPAIEMENT / MANQUE À GAGNER GLOBAL =====
 
-    perte_mensuelle = avs["rente_complete"] - rente_avs
+    # Référence LPP selon statut
+    if statut_pro == "independant":
+        lpp_reference = LPP_REFERENCE_MENSUELLE
+    else:
+        lpp_reference = lpp["rente_mensuelle"]
+
+    rente_reference_totale = avs["rente_complete"] + lpp_reference
+    rente_reelle_totale = rente_avs + lpp["rente_mensuelle"]
+
+    perte_mensuelle = rente_reference_totale - rente_reelle_totale
     perte_annuelle = perte_mensuelle * 12
     projection_20_ans = perte_annuelle * 20
+
+    # ===== OPTIMISATION =====
 
     annees_rachables = min(5, avs["annees_manquantes"])
     montant_recuperable = perte_annuelle * annees_rachables
