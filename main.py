@@ -68,6 +68,9 @@ def envoyer_email(template_id: int, email: str, prenom: str):
             "content-type": "application/json"
         }
     )
+@app.get("/ping")
+def ping():
+    return {"ok": True}
 
 # =========================================================
 # ROUTE : SUBMIT
