@@ -192,10 +192,11 @@ def calcul_complet_retraite(donnees: Dict) -> Dict:
             rente_avs -= excedent * ratio
             rente_conjoint -= excedent * (1 - ratio)
 
-        # ===== PRÉPAIEMENT / MANQUE À GAGNER GLOBAL =====
+        
+    # ===== PRÉPAIEMENT / MANQUE À GAGNER GLOBAL =====
 
     # Référence LPP selon statut
-    if statut_pro == "independant":
+    if statut_pro == "independant" and capital_lpp <= 0:
         lpp_reference = LPP_REFERENCE_MENSUELLE
     else:
         lpp_reference = lpp["rente_mensuelle"]
@@ -206,6 +207,7 @@ def calcul_complet_retraite(donnees: Dict) -> Dict:
     perte_mensuelle = rente_reference_totale - rente_reelle_totale
     perte_annuelle = perte_mensuelle * 12
     projection_20_ans = perte_annuelle * 20
+
 
     # ===== OPTIMISATION =====
 
