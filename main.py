@@ -55,7 +55,7 @@ app.add_middleware(
 @app.post("/webhook/shopify-paid")
 async def shopify_paid(request: Request, db: Session = Depends(get_db)):
 
-    # 🔐 Sécurité Shopify (HMAC)
+    # 🔐 Vérification HMAC Shopify
     body = await request.body()
     hmac_header = request.headers.get("X-Shopify-Hmac-Sha256")
 
@@ -68,33 +68,38 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     computed_hmac = base64.b64encode(digest).decode()
 
     if not hmac.compare_digest(computed_hmac, hmac_header):
+        print("❌ HMAC invalide")
         return {"ok": False}
 
-    # 🔄 payload JSON
+    # 🔄 Payload
     payload = await request.json()
-
-    # 📧 récupération email Shopify
-    email = payload.get("email") or payload.get("customer", {}).get("email")
-    if not email:
-        return {"ok": False}
-
-
     order = payload.get("order", payload)
+
+    # 📧 Email Shopify
     email = (
         order.get("email")
         or order.get("customer", {}).get("email")
-)
+    )
 
     if not email:
+        print("❌ Aucun email dans le payload Shopify")
         return {"ok": False}
 
+    email = email.strip().lower()
+    print("📧 Email reçu du webhook :", email)
 
-    # 🔎 retrouver le client
-    client = db.query(Client).filter(Client.email == email).first()
+    # 🔎 Client
+    client = (
+        db.query(Client)
+        .filter(Client.email.ilike(email))
+        .first()
+    )
+
     if not client:
+        print("❌ Client introuvable pour email :", email)
         return {"ok": False}
 
-    # 🔎 dernière simulation
+    # 🔎 Simulation
     simulation = (
         db.query(Simulation)
         .filter(Simulation.client_id == client.id)
@@ -103,17 +108,16 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     )
 
     if not simulation:
+        print("❌ Aucune simulation pour client :", email)
         return {"ok": False}
 
-    # 🧾 génération PDF
-
+    # 🧾 PDF
     pdf_path = generer_pdf_retraite(
         donnees=simulation.donnees,
         resultats=simulation.resultat
     )
 
-
-    # 📧 email avec PJ
+    # 📧 Envoi email premium
     envoyer_email_avec_pdf(
         template_id=2,
         email=client.email,
@@ -121,6 +125,7 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
         pdf_path=pdf_path
     )
 
+    print("✅ PDF envoyé à", email)
     return {"ok": True}
 
 # =========================================================
