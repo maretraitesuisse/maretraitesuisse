@@ -78,6 +78,17 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     if not email:
         return {"ok": False}
 
+
+    order = payload.get("order", payload)
+    email = (
+        order.get("email")
+        or order.get("customer", {}).get("email")
+)
+
+    if not email:
+        return {"ok": False}
+
+
     # 🔎 retrouver le client
     client = db.query(Client).filter(Client.email == email).first()
     if not client:
