@@ -8,6 +8,8 @@ import time
 import uuid
 import base64
 import requests
+import hmac
+import hashlib
 from typing import Optional
 
 from fastapi import FastAPI, Depends
@@ -18,6 +20,11 @@ from database import engine, get_db
 from simulateur_avs_lpp import calcul_complet_retraite
 from models.models import Base, Client, Simulation
 from routes.avis import router as avis_router
+from fastapi import Request
+from pdf_generator import generer_pdf_estimation
+
+
+
 
 # =========================================================
 # INITIALISATION DB
@@ -40,11 +47,74 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# =========================================================
+# WEBHOOK
+# =========================================================
+@app.post("/webhook/shopify-paid")
+async def shopify_paid(request: Request, db: Session = Depends(get_db)):
+
+    # 🔐 Sécurité Shopify (HMAC)
+    body = await request.body()
+    hmac_header = request.headers.get("X-Shopify-Hmac-Sha256")
+
+    digest = hmac.new(
+        SHOPIFY_WEBHOOK_SECRET.encode("utf-8"),
+        body,
+        hashlib.sha256
+    ).digest()
+
+    computed_hmac = base64.b64encode(digest).decode()
+
+    if not hmac.compare_digest(computed_hmac, hmac_header):
+        return {"ok": False}
+
+    # 🔄 payload JSON
+    payload = await request.json()
+
+    # 📧 récupération email Shopify
+    email = payload.get("email") or payload.get("customer", {}).get("email")
+    if not email:
+        return {"ok": False}
+
+    # 🔎 retrouver le client
+    client = db.query(Client).filter(Client.email == email).first()
+    if not client:
+        return {"ok": False}
+
+    # 🔎 dernière simulation
+    simulation = (
+        db.query(Simulation)
+        .filter(Simulation.client_id == client.id)
+        .order_by(Simulation.id.desc())
+        .first()
+    )
+
+    if not simulation:
+        return {"ok": False}
+
+    # 🧾 génération PDF
+    pdf_path = generer_pdf_estimation(
+        donnees=simulation.donnees,
+        resultats=simulation.resultat
+    )
+
+    # 📧 email avec PJ
+    envoyer_email_avec_pdf(
+        template_id=2,
+        email=client.email,
+        prenom=client.prenom,
+        pdf_path=pdf_path
+    )
+
+    return {"ok": True}
+
 # =========================================================
 # CONFIG BREVO
 # =========================================================
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
 
 SENDER = {
     "email": "noreply@maretraitesuisse.ch",
@@ -68,9 +138,33 @@ def envoyer_email(template_id: int, email: str, prenom: str):
             "content-type": "application/json"
         }
     )
-@app.get("/ping")
-def ping():
-    return {"ok": True}
+
+
+def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
+    with open(pdf_path, "rb") as f:
+        pdf_content = base64.b64encode(f.read()).decode()
+
+    payload = {
+        "templateId": template_id,
+        "to": [{"email": email}],
+        "params": {"prenom": prenom},
+        "sender": SENDER,
+        "attachment": [{
+            "content": pdf_content,
+            "name": "Projection_Retraite_MaRetraiteSuisse.pdf"
+        }]
+    }
+
+    requests.post(
+        BREVO_URL,
+        json=payload,
+        headers={
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json"
+        }
+    )
+
 
 # =========================================================
 # ROUTE : SUBMIT

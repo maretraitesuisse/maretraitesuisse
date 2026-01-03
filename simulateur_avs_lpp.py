@@ -102,7 +102,6 @@ def calcul_avs(
 # ===============================================================
 # LPP
 # ===============================================================
-
 def calcul_lpp(
     age_actuel: int,
     age_retraite: int,
@@ -120,18 +119,34 @@ def calcul_lpp(
     capital = capital_initial
     salaire = salaire_actuel
 
+    # === AJOUT PDF PREMIUM (SANS IMPACT CALCUL) ===
+    capital_history = []
+    # ============================================
+
     for age in range(age_actuel, age_retraite):
         taux = get_taux_epargne(age)
         sc = salaire_coordonne(salaire)
         capital += sc * taux
         salaire *= 1.005  # progression salariale prudente
 
+        # === AJOUT PDF PREMIUM (COPIE PASSIVE) ===
+        capital_history.append({
+            "age": age,
+            "capital": round(capital, 2)
+        })
+        # ========================================
+
     rente_mensuelle = (capital * TAUX_CONVERSION_LPP) / 12
 
     return {
         "capital_final": round(capital, 2),
-        "rente_mensuelle": round(rente_mensuelle, 2)
+        "rente_mensuelle": round(rente_mensuelle, 2),
+
+        # === AJOUT PDF PREMIUM ===
+        "capital_history": capital_history
+        # ========================
     }
+
 
 
 # ===============================================================
@@ -215,6 +230,34 @@ def calcul_complet_retraite(donnees: Dict) -> Dict:
     montant_recuperable = perte_annuelle * annees_rachables
     economie_fiscale = montant_recuperable * 0.25
 
+    # === AJOUT PDF PREMIUM (SANS IMPACT FRONT) ===
+
+    total_mensuel = rente_avs + lpp["rente_mensuelle"]
+    total_annuel = total_mensuel * 12
+
+    pdf_data = {
+        "synthese": {
+            "avs_mensuel": round(rente_avs, 2),
+            "lpp_mensuel": round(lpp["rente_mensuelle"], 2),
+            "total_mensuel": round(total_mensuel, 2),
+            "total_annuel": round(total_annuel, 2),
+            "part_avs_pct": round((rente_avs / total_mensuel) * 100, 1) if total_mensuel > 0 else 0,
+            "part_lpp_pct": round((lpp["rente_mensuelle"] / total_mensuel) * 100, 1) if total_mensuel > 0 else 0,
+        },
+        "avs_detail": avs,
+        "lpp_detail": {
+            "capital_final": lpp["capital_final"],
+            "rente_mensuelle": lpp["rente_mensuelle"],
+            "capital_history": lpp.get("capital_history", [])
+        }
+    }
+
+    # ============================================
+
+
+# ============================================
+
+
     # ===== RETURN =====
 
     return {
@@ -225,5 +268,6 @@ def calcul_complet_retraite(donnees: Dict) -> Dict:
         "impact_annuel": round(-perte_annuelle, 2),
         "projection_20_ans": round(-projection_20_ans, 2),
         "montant_recuperable": round(montant_recuperable, 2),
-        "economie_fiscale": round(economie_fiscale, 2)
+        "economie_fiscale": round(economie_fiscale, 2),
+        "pdf_data": pdf_data
     }
