@@ -21,7 +21,8 @@ from simulateur_avs_lpp import calcul_complet_retraite
 from models.models import Base, Client, Simulation
 from routes.avis import router as avis_router
 from fastapi import Request
-from pdf_generator import generer_pdf_estimation
+from pdf_generator import generer_pdf_retraite
+
 
 
 
@@ -94,10 +95,12 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
         return {"ok": False}
 
     # 🧾 génération PDF
-    pdf_path = generer_pdf_estimation(
+
+    pdf_path = generer_pdf_retraite(
         donnees=simulation.donnees,
         resultats=simulation.resultat
     )
+
 
     # 📧 email avec PJ
     envoyer_email_avec_pdf(
