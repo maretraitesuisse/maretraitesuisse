@@ -48,6 +48,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def note_attributes_to_dict(note_attrs):
+    if isinstance(note_attrs, list):
+        out = {}
+        for item in note_attrs:
+            if isinstance(item, dict) and "name" in item:
+                out[item["name"]] = item.get("value")
+        return out
+    if isinstance(note_attrs, dict):
+        return note_attrs
+    return {}
+
+
 
 # =========================================================
 # WEBHOOK
@@ -58,6 +70,14 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     # 🔐 Vérification HMAC Shopify
     body = await request.body()
     hmac_header = request.headers.get("X-Shopify-Hmac-Sha256")
+
+    if not SHOPIFY_WEBHOOK_SECRET:
+        print("❌ SHOPIFY_WEBHOOK_SECRET manquant côté Render")
+        return {"ok": False}
+
+    if not hmac_header:
+        print("❌ Header X-Shopify-Hmac-Sha256 manquant")
+        return {"ok": False}
 
     digest = hmac.new(
         SHOPIFY_WEBHOOK_SECRET.encode("utf-8"),
@@ -75,41 +95,77 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     order = payload.get("order", payload)
 
-    # 📧 Email Shopify
-    email = (
+    attrs = note_attributes_to_dict(order.get("note_attributes") or [])
+    simulation_id_attr = (attrs.get("simulation_id") or "").strip()
+    form_email_attr = (attrs.get("form_email") or "").strip().lower()
+
+
+    # 📧 Email Shopify (fallback)
+    email_shopify = (
         order.get("email")
         or order.get("customer", {}).get("email")
-    )
+        or ""
+    ).strip().lower()
 
-    if not email:
-        print("❌ Aucun email dans le payload Shopify")
+    # ✅ email à utiliser en priorité = celui du formulaire (si présent)
+    email_final = form_email_attr or email_shopify
+    
+    if not email_final:
+        print("❌ email_final vide (ni form_email ni email shopify)")
         return {"ok": False}
 
-    email = email.strip().lower()
-    print("📧 Email reçu du webhook :", email)
 
-    # 🔎 Client
-    client = (
-        db.query(Client)
-        .filter(Client.email.ilike(email))
-        .first()
-    )
+    print("🧾 order_id:", order.get("id"))
+    print("🧾 order_name:", order.get("name"))
 
-    if not client:
-        print("❌ Client introuvable pour email :", email)
-        return {"ok": False}
+    print("📦 note_attributes:", attrs)
+    print("🆔 simulation_id_attr:", simulation_id_attr)
+    print("📧 email_shopify:", email_shopify)
+    print("📧 email_final:", email_final)
 
-    # 🔎 Simulation
-    simulation = (
-        db.query(Simulation)
-        .filter(Simulation.client_id == client.id)
-        .order_by(Simulation.id.desc())
-        .first()
-    )
+    simulation = None
+    client = None
+
+    # 1) ✅ Chercher directement la simulation via simulation_id (le plus fiable)
+    if simulation_id_attr.isdigit():
+        simulation = (
+            db.query(Simulation)
+            .filter(Simulation.id == int(simulation_id_attr))
+            .first()
+        )
+        if simulation:
+            client = (
+                db.query(Client)
+                .filter(Client.id == simulation.client_id)
+                .first()
+            )
+
+    # 2) Fallback: si pas trouvé via simulation_id, chercher par email_final
+    if not simulation:
+        if not email_final:
+            print("❌ Aucun email exploitable (form_email ou shopify email)")
+            return {"ok": False}
+
+        client = (
+            db.query(Client)
+            .filter(Client.email.ilike(email_final))
+            .first()
+        )
+        if not client:
+            print("❌ Client introuvable pour email :", email_final)
+            return {"ok": False}
+
+        simulation = (
+            db.query(Simulation)
+            .filter(Simulation.client_id == client.id)
+            .order_by(Simulation.id.desc())
+            .first()
+        )
 
     if not simulation:
-        print("❌ Aucune simulation pour client :", email)
+        print("❌ Aucune simulation trouvée (ni par simulation_id, ni par email)")
         return {"ok": False}
+
 
     # 🧾 PDF
     pdf_path = generer_pdf_retraite(
@@ -120,12 +176,14 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     # 📧 Envoi email premium
     envoyer_email_avec_pdf(
         template_id=2,
-        email=client.email,
-        prenom=client.prenom,
+        email=email_final,          # ✅ important
+        prenom=(client.prenom if client else (attrs.get("form_prenom") or "")).strip(),
         pdf_path=pdf_path
-    )
+)
 
-    print("✅ PDF envoyé à", email)
+
+    print("✅ PDF envoyé à", email_final)
+
     return {"ok": True}
 
 # =========================================================
@@ -141,6 +199,10 @@ SENDER = {
 }
 
 def envoyer_email(template_id: int, email: str, prenom: str):
+    if not BREVO_API_KEY:
+        print("❌ BREVO_API_KEY manquant côté Render")
+        return
+
     payload = {
         "templateId": template_id,
         "to": [{"email": email}],
@@ -148,7 +210,7 @@ def envoyer_email(template_id: int, email: str, prenom: str):
         "sender": SENDER
     }
 
-    requests.post(
+    resp = requests.post(
         BREVO_URL,
         json=payload,
         headers={
@@ -158,8 +220,19 @@ def envoyer_email(template_id: int, email: str, prenom: str):
         }
     )
 
+    print("📨 Brevo status:", resp.status_code)
+    try:
+        print("📨 Brevo body:", resp.json())
+    except Exception:
+        print("📨 Brevo body (raw):", resp.text)
+
+    
 
 def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
+    if not BREVO_API_KEY:
+        print("❌ BREVO_API_KEY manquant côté Render")
+        return
+
     with open(pdf_path, "rb") as f:
         pdf_content = base64.b64encode(f.read()).decode()
 
@@ -174,7 +247,7 @@ def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
         }]
     }
 
-    requests.post(
+    resp = requests.post(
         BREVO_URL,
         json=payload,
         headers={
@@ -183,6 +256,12 @@ def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
             "content-type": "application/json"
         }
     )
+
+    print("📨 Brevo status:", resp.status_code)
+    try:
+        print("📨 Brevo body:", resp.json())
+    except Exception:
+        print("📨 Brevo body (raw):", resp.text)
 
 
 # =========================================================
@@ -210,11 +289,13 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         "annees_be": int(payload.get("annees_be") or 0),
         "annees_ba": int(payload.get("annees_ba") or 0),
 
-        "capital_lpp": float(payload.get("capital_lpp") or 0),
+        "capital_lpp": float(payload.get("capital_lpp") or payload.get("capital_LPP") or 0),
+
         "rente_conjoint": float(payload.get("rente_conjoint") or 0),
 
-        "has_3eme_pilier": payload.get("has_3eme_pilier"),
-        "type_3eme_pilier": payload.get("type_3eme_pilier"),
+        "has_3eme_pilier": payload.get("has_3eme_pilier") or payload.get("has_3eme_Pilier"),
+        "type_3eme_pilier": payload.get("type_3eme_pilier") or payload.get("type_3eme_Pilier"),
+
     }
 
 
