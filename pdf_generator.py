@@ -1,210 +1,681 @@
+# pdf_generator.py
 import os
 import datetime
+import math
+import base64
+
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
 from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Paragraph
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# ===============================================================
-# COULEURS & STYLES
-# ===============================================================
-
-PRIMARY = colors.HexColor("#2563eb")
-BLACK = colors.HexColor("#111827")
-GRAY = colors.HexColor("#6b7280")
-
-styles = getSampleStyleSheet()
-
-TITLE = ParagraphStyle(
-    "Title",
-    fontName="Helvetica-Bold",
-    fontSize=20,
-    leading=24,
-    textColor=PRIMARY
-)
-
-TEXT = ParagraphStyle(
-    "Text",
-    fontName="Helvetica",
-    fontSize=11,
-    leading=15,
-    textColor=BLACK
-)
-
-SMALL = ParagraphStyle(
-    "Small",
-    fontName="Helvetica",
-    fontSize=9,
-    leading=12,
-    textColor=GRAY
-)
 
 # ===============================================================
-# GRAPHIQUE CAPITAL LPP
+# THEME (plus "cabinet" que UI)
 # ===============================================================
 
-def draw_capital_graph(capital_history):
-    ages = [x["age"] for x in capital_history]
-    capitals = [x["capital"] for x in capital_history]
+PRIMARY = colors.HexColor("#1F3C88")   # bleu plus pro
+UI_BLUE = colors.HexColor("#2563EB")  # bleu UI si besoin
+BLACK   = colors.HexColor("#111827")
+GRAY    = colors.HexColor("#6b7280")
+LIGHT   = colors.HexColor("#e5e7eb")
+MUTED   = colors.HexColor("#f3f4f6")
+WHITE   = colors.white
 
-    plt.figure(figsize=(6, 3))
-    plt.plot(ages, capitals, linewidth=2)
-    plt.fill_between(ages, capitals, alpha=0.15)
-    plt.title("Évolution du capital LPP")
-    plt.xlabel("Âge")
-    plt.ylabel("CHF")
-    plt.grid(alpha=0.3)
+SUCCESS_BG = colors.HexColor("#16a34a")
+SUCCESS_TX = colors.white
 
-    path = "capital_lpp.png"
+WARN_BG = colors.HexColor("#FEF3C7")
+WARN_TX = colors.HexColor("#92400E")
+DANGER  = colors.HexColor("#dc2626")
+
+
+# ===============================================================
+# UTILS
+# ===============================================================
+
+def asset_path(*parts):
+    """assets/... relative to this file."""
+    return os.path.join(os.path.dirname(__file__), "assets", *parts)
+
+def fmt_int(n):
+    try:
+        return f"{int(round(float(n))):,}".replace(",", " ")
+    except Exception:
+        return str(n)
+
+def fmt_chf(n, decimals=0):
+    try:
+        v = float(n)
+        if decimals == 0:
+            return f"{int(round(v)):,}".replace(",", " ") + " CHF"
+        return f"{v:,.{decimals}f}".replace(",", " ").replace(".", ",") + " CHF"
+    except Exception:
+        return f"{n} CHF"
+
+def fmt_pct(x, decimals=1):
+    try:
+        v = float(x)
+        return f"{v:.{decimals}f} %".replace(".", ",")
+    except Exception:
+        return f"{x} %"
+
+def safe_get(d, path, default=None):
+    """safe_get(d, ['a','b','c'])"""
+    cur = d
+    for p in path:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(p)
+    return cur if cur is not None else default
+
+
+# ===============================================================
+# DRAW PRIMITIVES (ReportLab)
+# ===============================================================
+
+def draw_shadow_card(c, x, y, w, h, r=12, fill=MUTED, stroke=LIGHT):
+    """Simple shadow simulation: draw gray offset rect then main rect."""
+    # shadow
+    c.setFillColor(colors.HexColor("#d1d5db"))
+    c.setStrokeColor(colors.HexColor("#d1d5db"))
+    c.roundRect(x + 2, y - 2, w, h, r, stroke=0, fill=1)
+
+    # main
+    c.setFillColor(fill)
+    c.setStrokeColor(stroke)
+    c.setLineWidth(1)
+    c.roundRect(x, y, w, h, r, stroke=1, fill=1)
+
+def draw_card(c, x, y, w, h, r=12, fill=WHITE, stroke=LIGHT):
+    c.setFillColor(fill)
+    c.setStrokeColor(stroke)
+    c.setLineWidth(1)
+    c.roundRect(x, y, w, h, r, stroke=1, fill=1)
+
+def draw_h1(c, text, x, y, color=UI_BLUE):
+    c.setFont("Helvetica-Bold", 28)
+    c.setFillColor(color)
+    c.drawString(x, y, text)
+
+def draw_h2(c, text, x, y, color=BLACK):
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColor(color)
+    c.drawString(x, y, text)
+
+def draw_p(c, text, x, y, size=12, color=BLACK):
+    c.setFont("Helvetica", size)
+    c.setFillColor(color)
+    c.drawString(x, y, text)
+
+def draw_small(c, text, x, y, color=GRAY):
+    c.setFont("Helvetica", 9.5)
+    c.setFillColor(color)
+    c.drawString(x, y, text)
+
+def draw_top_confidential(c, width, height):
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10)
+    c.drawString(2*cm, height - 1.2*cm, "Document confidentiel — Ma Retraite Suisse")
+
+def draw_footer(c, width):
+    year = datetime.datetime.now().year
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(width/2, 1.2*cm, f"www.maretraitesuisse.ch — © {year} Ma Retraite Suisse")
+
+def draw_divider(c, x1, y, x2, color=LIGHT):
+    c.setStrokeColor(color)
+    c.setLineWidth(1)
+    c.line(x1, y, x2, y)
+
+
+# ===============================================================
+# CHARTS (Matplotlib -> PNG -> drawImage)
+# ===============================================================
+
+def draw_donut_chart(values, labels, out_path):
+    """
+    values: [avs, lpp]
+    """
+    plt.figure(figsize=(3.0, 3.0))
+    plt.pie(
+        values,
+        labels=None,
+        startangle=90,
+        wedgeprops=dict(width=0.28),
+    )
+    # center circle look
+    centre = plt.Circle((0, 0), 0.55, fc="white")
+    plt.gca().add_artist(centre)
     plt.tight_layout()
-    plt.savefig(path, dpi=200)
+    plt.savefig(out_path, dpi=200, transparent=True)
     plt.close()
-    return path
+    return out_path
+
+def draw_capital_graph(capital_history, out_path):
+    ages = []
+    capitals = []
+    for x in (capital_history or []):
+        try:
+            ages.append(float(x.get("age")))
+            capitals.append(float(x.get("capital")))
+        except Exception:
+            pass
+
+    if not ages or not capitals:
+        # avoid crash; generate empty chart
+        ages = [45, 50, 55, 60, 65]
+        capitals = [0, 0, 0, 0, 0]
+
+    plt.figure(figsize=(6.5, 3.2))
+    # style close to UI screenshot
+    plt.plot(ages, capitals, linewidth=4)
+    plt.fill_between(ages, capitals, alpha=0.15)
+    plt.grid(alpha=0.25)
+    plt.xlabel("Âge", fontsize=14, labelpad=12)
+    plt.ylabel("CHF", fontsize=14, labelpad=10)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    plt.close()
+    return out_path
+
 
 # ===============================================================
-# PAGES
+# P1 — COVER
 # ===============================================================
 
 def page_cover(c, donnees):
     width, height = A4
 
-    prenom = donnees.get("prenom", "")
-    nom = donnees.get("nom", "")
-    canton = donnees.get("canton", "")
-    annee = datetime.datetime.now().year
+    prenom = (donnees.get("prenom") or "").strip()
+    nom = (donnees.get("nom") or "").strip()
+    age_actuel = donnees.get("age_actuel")
+    age_retraite = donnees.get("age_retraite")
 
-    c.setFont("Helvetica-Bold", 26)
+    today = datetime.datetime.now()
+    date_str = today.strftime("%d/%m/%Y")
+    year = today.year
+
+    # subtle top divider
+    draw_divider(c, width*0.22, height - 2.2*cm, width*0.78)
+
+    # Logo centered
+    logo_path = asset_path("logo.png")
+    logo_drawn = False
+    if os.path.exists(logo_path):
+        img = ImageReader(logo_path)
+        iw, ih = img.getSize()
+        target_w = 7.2 * cm
+        scale = target_w / float(iw)
+        target_h = ih * scale
+
+        x = (width - target_w) / 2
+        y = height - 6.2 * cm
+        c.drawImage(logo_path, x, y, width=target_w, height=target_h, mask="auto")
+        logo_drawn = True
+
+    title_y = height - (9.3 * cm if logo_drawn else 6.5 * cm)
+
+    # Title
+    c.setFont("Helvetica-Bold", 22)
     c.setFillColor(PRIMARY)
-    c.drawString(2*cm, height - 4*cm, "Projection retraite complète")
+    c.drawCentredString(width/2, title_y, "PROJECTION RETRAITE CERTIFIÉE")
 
-    c.setFont("Helvetica", 16)
+    # Subtitle
+    c.setFont("Helvetica", 13)
     c.setFillColor(BLACK)
-    c.drawString(2*cm, height - 6*cm,
-                 f"{annee} — {prenom} {nom} ({canton})")
+    c.drawCentredString(width/2, title_y - 1.2*cm, "Analyse personnalisée AVS & LPP")
 
-    c.setFont("Helvetica", 10)
+    # Client box
+    box_w = width * 0.70
+    box_h = 4.2 * cm
+    box_x = (width - box_w) / 2
+    box_y = title_y - 7.4 * cm
+
+    draw_card(c, box_x, box_y, box_w, box_h, r=14, fill=WHITE, stroke=LIGHT)
+
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(box_x + 1.3*cm, box_y + box_h - 1.35*cm, f"Client : {prenom} {nom}".strip())
+
+    c.setFont("Helvetica", 11.2)
+    if age_actuel is not None:
+        c.drawString(box_x + 1.3*cm, box_y + box_h - 2.45*cm, f"Âge actuel : {age_actuel} ans")
+    if age_retraite is not None:
+        c.drawString(box_x + 1.3*cm, box_y + box_h - 3.25*cm, f"Départ prévu : {age_retraite} ans")
+
     c.setFillColor(GRAY)
-    c.drawString(2*cm, 2*cm,
-                 "Document confidentiel — Ma Retraite Suisse")
+    c.setFont("Helvetica", 10)
+    c.drawString(box_x + 1.3*cm, box_y + 0.9*cm, f"Rapport généré le : {date_str}")
+
+    # Legal
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 8.5)
+    c.drawCentredString(
+        width/2,
+        2.1*cm,
+        "Ce rapport fournit une estimation indicative basée sur les informations déclarées et ne constitue pas un conseil financier contractuel."
+    )
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(width/2, 1.2*cm, f"www.maretraitesuisse.ch — © {year} Ma Retraite Suisse")
 
     c.showPage()
 
+
+# ===============================================================
+# P2 — SYNTHÈSE (style UI)
+# ===============================================================
 
 def page_synthese(c, pdf):
     width, height = A4
-    s = pdf["synthese"]
+    s = pdf.get("synthese", {}) if isinstance(pdf, dict) else {}
 
-    c.setFont("Helvetica-Bold", 18)
-    c.setFillColor(PRIMARY)
-    c.drawString(2*cm, height - 2.5*cm, "Synthèse globale")
+    total_m = s.get("total_mensuel")
+    avs_m = s.get("avs_mensuel")
+    lpp_m = s.get("lpp_mensuel")
+    part_avs = s.get("part_avs_pct")
+    part_lpp = s.get("part_lpp_pct")
 
+    draw_top_confidential(c, width, height)
+
+    # Title
+    draw_h1(c, "Synthèse globale", 2*cm, height - 4.2*cm, color=UI_BLUE)
+
+    # Main blue card (total)
+    card_x = 2*cm
+    card_w = width - 4*cm
+    card_y = height - 11.0*cm
+    card_h = 3.4*cm
+
+    draw_shadow_card(c, card_x, card_y, card_w, card_h, r=16, fill=UI_BLUE, stroke=UI_BLUE)
+    c.setFillColor(colors.white)
     c.setFont("Helvetica", 12)
+    c.drawCentredString(width/2, card_y + card_h - 1.05*cm, "Votre revenu mensuel total à la retraite")
+
+    c.setFont("Helvetica-Bold", 34)
+    c.drawCentredString(width/2, card_y + 1.15*cm, f"{fmt_int(total_m)} CHF" if total_m is not None else "—")
+
+    # Two cards AVS/LPP
+    gap = 0.8*cm
+    small_w = (card_w - gap) / 2
+    small_h = 3.0*cm
+    small_y = card_y - (small_h + 1.2*cm)
+
+    # AVS card
+    avs_x = card_x
+    draw_shadow_card(c, avs_x, small_y, small_w, small_h, r=14, fill=WHITE, stroke=LIGHT)
     c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(avs_x + 1.0*cm, small_y + small_h - 1.1*cm, "AVS (1er Pilier)")
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(avs_x + 1.0*cm, small_y + 1.2*cm, f"{fmt_int(avs_m)} CHF" if avs_m is not None else "—")
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(avs_x + 1.0*cm, small_y + 0.6*cm, f"{fmt_pct(part_avs, 1)} de votre revenu" if part_avs is not None else "")
 
-    c.drawString(2*cm, height - 5*cm,
-                 f"Revenu total mensuel : {s['total_mensuel']:,.0f} CHF")
+    # LPP card
+    lpp_x = avs_x + small_w + gap
+    draw_shadow_card(c, lpp_x, small_y, small_w, small_h, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(lpp_x + 1.0*cm, small_y + small_h - 1.1*cm, "LPP (2ème Pilier)")
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(lpp_x + 1.0*cm, small_y + 1.2*cm, f"{fmt_int(lpp_m)} CHF" if lpp_m is not None else "—")
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(lpp_x + 1.0*cm, small_y + 0.6*cm, f"{fmt_pct(part_lpp, 1)} de votre revenu" if part_lpp is not None else "")
 
-    c.drawString(2*cm, height - 6.5*cm,
-                 f"AVS : {s['avs_mensuel']:,.0f} CHF ({s['part_avs_pct']} %)")
+    # Donut section
+    donut_y = small_y - 7.0*cm
+    draw_card(c, card_x, donut_y, card_w, 6.0*cm, r=16, fill=WHITE, stroke=LIGHT)
 
-    c.drawString(2*cm, height - 8*cm,
-                 f"LPP : {s['lpp_mensuel']:,.0f} CHF ({s['part_lpp_pct']} %)")
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(card_x + 1.0*cm, donut_y + 6.0*cm - 1.1*cm, "Répartition de vos revenus")
 
+    # donut image
+    donut_path = "donut_tmp.png"
+    try:
+        values = [float(avs_m or 0), float(lpp_m or 0)]
+        if values[0] + values[1] <= 0:
+            values = [1, 1]
+        draw_donut_chart(values, ["AVS", "LPP"], donut_path)
+        c.drawImage(donut_path, card_x + 6.0*cm, donut_y + 0.9*cm, width=6.0*cm, height=4.8*cm, mask="auto")
+    finally:
+        if os.path.exists(donut_path):
+            os.remove(donut_path)
+
+    # labels around
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(card_x + 1.0*cm, donut_y + 3.6*cm, f"AVS (1er pilier) : {fmt_pct(part_avs, 1)}" if part_avs is not None else "AVS (1er pilier)")
+    c.drawString(card_x + 1.0*cm, donut_y + 2.4*cm, f"LPP (2ème pilier) : {fmt_pct(part_lpp, 1)}" if part_lpp is not None else "LPP (2ème pilier)")
+
+    draw_footer(c, width)
     c.showPage()
 
+
+# ===============================================================
+# P3 — AVS DÉTAILLÉ
+# ===============================================================
 
 def page_avs(c, avs):
     width, height = A4
 
-    c.setFont("Helvetica-Bold", 18)
-    c.setFillColor(PRIMARY)
-    c.drawString(2*cm, height - 2.5*cm, "Détail AVS")
+    draw_top_confidential(c, width, height)
+    draw_h1(c, "Détail AVS", 2*cm, height - 4.2*cm, color=UI_BLUE)
 
+    # Extract values
+    annees_validees = avs.get("annees_validees")
+    annees_manquantes = avs.get("annees_manquantes")
+    ramd = avs.get("ramd")
+    rente_complete = avs.get("rente_complete")
+    rente_finale = avs.get("rente_finale")
+    impact = avs.get("impact_pct")
+
+    # Big grid cards (2 columns)
+    card_x = 2*cm
+    card_w = width - 4*cm
+    y0 = height - 8.5*cm
+
+    # Cards row 1
+    gap = 0.8*cm
+    w2 = (card_w - gap) / 2
+    h2 = 3.0*cm
+
+    # Années cotisées / réduction card look like UI
+    draw_shadow_card(c, card_x, y0, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(card_x + 1.0*cm, y0 + h2 - 1.1*cm, "Années validées")
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(card_x + 1.0*cm, y0 + 1.0*cm, f"{fmt_int(annees_validees)}" if annees_validees is not None else "—")
+
+    x2 = card_x + w2 + gap
+    draw_shadow_card(c, x2, y0, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(x2 + 1.0*cm, y0 + h2 - 1.1*cm, "Années manquantes")
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(x2 + 1.0*cm, y0 + 1.0*cm, f"{fmt_int(annees_manquantes)}" if annees_manquantes is not None else "—")
+
+    # Row 2 cards
+    y1 = y0 - (h2 + 1.0*cm)
+    draw_shadow_card(c, card_x, y1, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(card_x + 1.0*cm, y1 + h2 - 1.1*cm, "RAMD")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(card_x + 1.0*cm, y1 + 1.0*cm, fmt_chf(ramd, 0) if ramd is not None else "—")
+
+    draw_shadow_card(c, x2, y1, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(x2 + 1.0*cm, y1 + h2 - 1.1*cm, "Réduction")
+    c.setFont("Helvetica-Bold", 18)
+    c.setFillColor(DANGER if impact is not None else BLACK)
+    c.drawString(x2 + 1.0*cm, y1 + 1.0*cm, f"-{fmt_pct(impact, 1)}" if impact is not None else "—")
+
+    # Detail box (like UI "Détail du calcul")
+    box_y = y1 - 7.2*cm
+    draw_card(c, card_x, box_y, card_w, 6.4*cm, r=16, fill=WHITE, stroke=LIGHT)
+
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(card_x + 1.0*cm, box_y + 6.4*cm - 1.1*cm, "Détail du calcul")
+
+    # lines
+    lines = [
+        ("Rente pour carrière complète", fmt_chf(rente_complete, 0) if rente_complete is not None else "—"),
+        ("Rente mensuelle finale", fmt_chf(rente_finale, 0) if rente_finale is not None else "—"),
+    ]
     c.setFont("Helvetica", 11)
     c.setFillColor(BLACK)
+    yy = box_y + 6.4*cm - 2.2*cm
+    for label, val in lines:
+        c.setFillColor(GRAY)
+        c.drawString(card_x + 1.0*cm, yy, label)
+        c.setFillColor(BLACK)
+        c.drawRightString(card_x + card_w - 1.0*cm, yy, val)
+        yy -= 1.1*cm
 
-    y = height - 5*cm
-    for label, value in [
-        ("Années validées", avs["annees_validees"]),
-        ("Années manquantes", avs["annees_manquantes"]),
-        ("RAMD", f"{avs['ramd']:,.0f} CHF"),
-        ("Rente complète", f"{avs['rente_complete']:,.0f} CHF"),
-        ("Rente finale", f"{avs['rente_finale']:,.0f} CHF"),
-        ("Impact", f"{avs['impact_pct']} %"),
-    ]:
-        c.drawString(2*cm, y, f"{label} : {value}")
-        y -= 1.2*cm
+    # Warning box (années manquantes)
+    if annees_manquantes and float(annees_manquantes) > 0:
+        warn_y = box_y - 3.2*cm
+        draw_card(c, card_x, warn_y, card_w, 2.6*cm, r=14, fill=WARN_BG, stroke=colors.HexColor("#FDE68A"))
+        c.setFillColor(WARN_TX)
+        c.setFont("Helvetica-Bold", 11.5)
+        c.drawString(card_x + 1.0*cm, warn_y + 1.65*cm, f"{fmt_int(annees_manquantes)} années manquantes")
+        c.setFont("Helvetica", 10.5)
+        c.drawString(card_x + 1.0*cm, warn_y + 0.85*cm, f"Votre rente AVS est réduite de {fmt_pct(impact, 1) if impact is not None else '—'}.")
 
+    draw_footer(c, width)
     c.showPage()
 
+
+# ===============================================================
+# P4 — LPP DÉTAILLÉ
+# ===============================================================
 
 def page_lpp(c, lpp):
     width, height = A4
+    draw_top_confidential(c, width, height)
+    draw_h1(c, "Détail LPP", 2*cm, height - 4.2*cm, color=UI_BLUE)
 
-    c.setFont("Helvetica-Bold", 18)
-    c.setFillColor(PRIMARY)
-    c.drawString(2*cm, height - 2.5*cm, "Détail LPP")
+    capital_actuel = lpp.get("capital_actuel", 0)
+    capital_final = lpp.get("capital_final")
+    rente_mensuelle = lpp.get("rente_mensuelle")
+    annees_restantes = lpp.get("annees_restantes")
+    history = lpp.get("capital_history", [])
 
-    c.setFont("Helvetica", 11)
+    card_x = 2*cm
+    card_w = width - 4*cm
+    gap = 0.8*cm
+    w2 = (card_w - gap) / 2
+    h2 = 3.0*cm
+
+    y0 = height - 8.5*cm
+
+    # Row 1 cards
+    draw_shadow_card(c, card_x, y0, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
     c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(card_x + 1.0*cm, y0 + h2 - 1.1*cm, "Capital actuel")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(card_x + 1.0*cm, y0 + 1.0*cm, fmt_chf(capital_actuel, 0))
 
-    c.drawString(2*cm, height - 5*cm,
-                 f"Capital projeté : {lpp['capital_final']:,.0f} CHF")
+    x2 = card_x + w2 + gap
+    draw_shadow_card(c, x2, y0, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(x2 + 1.0*cm, y0 + h2 - 1.1*cm, "Capital projeté")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(x2 + 1.0*cm, y0 + 1.0*cm, fmt_chf(capital_final, 0) if capital_final is not None else "—")
 
-    c.drawString(2*cm, height - 6.5*cm,
-                 f"Rente mensuelle : {lpp['rente_mensuelle']:,.0f} CHF")
+    # Row 2 cards
+    y1 = y0 - (h2 + 1.0*cm)
+    draw_shadow_card(c, card_x, y1, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(card_x + 1.0*cm, y1 + h2 - 1.1*cm, "Rente mensuelle")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(card_x + 1.0*cm, y1 + 1.0*cm, fmt_chf(rente_mensuelle, 0) if rente_mensuelle is not None else "—")
 
-    graph = draw_capital_graph(lpp["capital_history"])
-    c.drawImage(graph, 2*cm, height - 15*cm, width=16*cm)
+    draw_shadow_card(c, x2, y1, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 11.5)
+    c.drawString(x2 + 1.0*cm, y1 + h2 - 1.1*cm, "Années restantes")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(x2 + 1.0*cm, y1 + 1.0*cm, f"{fmt_int(annees_restantes)} ans" if annees_restantes is not None else "—")
 
+    # Graph card
+    graph_y = y1 - 8.2*cm
+    draw_card(c, card_x, graph_y, card_w, 7.4*cm, r=16, fill=WHITE, stroke=LIGHT)
+
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(card_x + 1.0*cm, graph_y + 7.4*cm - 1.1*cm, "Projection de votre capital")
+
+    graph_path = "capital_lpp_tmp.png"
+    try:
+        draw_capital_graph(history, graph_path)
+        c.drawImage(graph_path, card_x + 1.0*cm, graph_y + 1.0*cm, width=card_w - 2.0*cm, height=5.8*cm)
+    finally:
+        if os.path.exists(graph_path):
+            os.remove(graph_path)
+
+    draw_footer(c, width)
     c.showPage()
 
-    if os.path.exists(graph):
-        os.remove(graph)
-
-
-def page_scenarios(c, s):
-    width, height = A4
-
-    c.setFont("Helvetica-Bold", 18)
-    c.setFillColor(PRIMARY)
-    c.drawString(2*cm, height - 2.5*cm, "Scénarios")
-
-    c.setFont("Helvetica", 11)
-    c.setFillColor(BLACK)
-
-    c.drawString(2*cm, height - 5*cm,
-                 "Sans rachat : situation actuelle projetée")
-
-    c.drawString(2*cm, height - 7*cm,
-                 "Avec rachat LPP : hypothèse indicative")
-
-    c.setFont("Helvetica-Oblique", 10)
-    c.setFillColor(GRAY)
-    c.drawString(2*cm, 2*cm,
-                 "Les montants exacts seront déterminés lors d’un entretien personnalisé.")
-
-    c.showPage()
 
 # ===============================================================
-# GÉNÉRATEUR PRINCIPAL
+# P5 — SCÉNARIOS + CONCLUSION
+# ===============================================================
+
+def page_scenarios(c, pdf):
+    width, height = A4
+    draw_top_confidential(c, width, height)
+    draw_h1(c, "Scénarios", 2*cm, height - 4.2*cm, color=UI_BLUE)
+
+    scenarios = pdf.get("scenarios", {}) if isinstance(pdf, dict) else {}
+
+    # Values (if present)
+    sans = scenarios.get("sans_rachat", {})
+    rachat = scenarios.get("rachat_lpp", {})
+
+    # Top explanatory text
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(2*cm, height - 5.4*cm,
+                 "Voici les scénarios d'optimisation possibles selon votre situation. Les calculs sont indicatifs et dépendent de votre situation fiscale exacte.")
+
+    card_x = 2*cm
+    card_w = width - 4*cm
+
+    # Sans rachat card
+    y0 = height - 9.8*cm
+    draw_shadow_card(c, card_x, y0, card_w, 3.0*cm, r=16, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(card_x + 1.0*cm, y0 + 1.9*cm, "Sans rachat")
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(card_x + 1.0*cm, y0 + 1.0*cm, "Situation actuelle projetée")
+
+    sans_m = sans.get("rente_mensuelle") or safe_get(pdf, ["synthese", "total_mensuel"])
+    c.setFillColor(colors.HexColor("#15803d"))
+    c.setFont("Helvetica-Bold", 16)
+    if sans_m is not None:
+        c.drawRightString(card_x + card_w - 1.0*cm, y0 + 1.45*cm, f"{fmt_int(sans_m)} CHF")
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", 9.5)
+        c.drawRightString(card_x + card_w - 1.0*cm, y0 + 0.85*cm, "rente mensuelle")
+
+    # Rachat LPP card (recommended)
+    y1 = y0 - 4.2*cm
+    draw_shadow_card(c, card_x, y1, card_w, 4.2*cm, r=16, fill=colors.HexColor("#ECFDF5"), stroke=colors.HexColor("#bbf7d0"))
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(card_x + 1.0*cm, y1 + 3.0*cm, "Rachat LPP optimisé")
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(card_x + 1.0*cm, y1 + 2.2*cm, "Rachat étalé sur 5 ans  •  Recommandé")
+
+    rachat_m = rachat.get("rente_mensuelle")
+    c.setFillColor(colors.HexColor("#15803d"))
+    c.setFont("Helvetica-Bold", 16)
+    if rachat_m is not None:
+        c.drawRightString(card_x + card_w - 1.0*cm, y1 + 2.7*cm, f"{fmt_int(rachat_m)} CHF")
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", 9.5)
+        c.drawRightString(card_x + card_w - 1.0*cm, y1 + 2.1*cm, "rente mensuelle")
+
+    # 4 metrics line
+    metrics = [
+        ("Coût total", rachat.get("cout_total")),
+        ("Économie impôt", rachat.get("economie_impot")),
+        ("Gain mensuel", rachat.get("gain_mensuel")),
+        ("Gain sur 20 ans", rachat.get("gain_20_ans")),
+    ]
+    mx = card_x + 1.0*cm
+    my = y1 + 1.1*cm
+    col_w = (card_w - 2.0*cm) / 4
+
+    for i, (lab, val) in enumerate(metrics):
+        x = mx + i * col_w
+        c.setFillColor(GRAY)
+        c.setFont("Helvetica", 9.5)
+        c.drawString(x, my + 0.65*cm, lab)
+        c.setFillColor(BLACK)
+        c.setFont("Helvetica-Bold", 11.5)
+        if val is None:
+            c.drawString(x, my, "—")
+        else:
+            # keep sign for values like -12843
+            try:
+                vv = float(val)
+                if "impôt" in lab.lower() and vv < 0:
+                    c.setFillColor(colors.HexColor("#15803d"))
+                if "gain" in lab.lower() and vv > 0:
+                    c.setFillColor(colors.HexColor("#2563eb"))
+                c.drawString(x, my, fmt_chf(vv, 0).replace(" CHF", " CHF"))
+            except Exception:
+                c.drawString(x, my, str(val))
+
+    # Next steps box
+    y2 = y1 - 5.0*cm
+    draw_card(c, card_x, y2, card_w, 3.8*cm, r=16, fill=WHITE, stroke=LIGHT)
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica-Bold", 12.5)
+    c.drawString(card_x + 1.0*cm, y2 + 2.7*cm, "Prochaines étapes")
+
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10.5)
+    c.drawString(card_x + 1.0*cm, y2 + 1.9*cm,
+                 "Pour mettre en place ces optimisations, vous devrez fournir vos documents")
+    c.drawString(card_x + 1.0*cm, y2 + 1.3*cm,
+                 "officiels (extrait de compte AVS, certificats LPP). Notre équipe vous")
+    c.drawString(card_x + 1.0*cm, y2 + 0.7*cm,
+                 "accompagne dans toutes les démarches. Un conseiller vous contactera sous 48h.")
+
+    draw_footer(c, width)
+    c.showPage()
+
+
+# ===============================================================
+# GÉNÉRATEUR PRINCIPAL (signature inchangée)
 # ===============================================================
 
 def generer_pdf_retraite(donnees, resultats, output="projection_retraite.pdf"):
-
-    pdf = resultats["pdf_data"]
+    """
+    Ne casse pas tes branchements.
+    Attend resultats["pdf_data"] comme avant.
+    """
+    pdf = resultats.get("pdf_data", {}) if isinstance(resultats, dict) else {}
 
     c = canvas.Canvas(output, pagesize=A4)
 
+    # P1
     page_cover(c, donnees)
+
+    # P2
     page_synthese(c, pdf)
-    page_avs(c, pdf["avs_detail"])
-    page_lpp(c, pdf["lpp_detail"])
+
+    # P3
+    avs_detail = pdf.get("avs_detail", {})
+    page_avs(c, avs_detail)
+
+    # P4
+    lpp_detail = pdf.get("lpp_detail", {})
+    page_lpp(c, lpp_detail)
+
+    # P5
     page_scenarios(c, pdf)
 
     c.save()
