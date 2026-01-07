@@ -43,27 +43,52 @@ def asset_path(*parts):
     """assets/... relative to this file."""
     return os.path.join(os.path.dirname(__file__), "assets", *parts)
 
-def fmt_int(n):
+def _to_float(x):
+    """
+    Convertit proprement vers float même si x contient:
+    - espaces (ex: "1 887")
+    - virgule décimale (ex: "12,5")
+    - suffixe CHF/% (ex: "1 200 CHF")
+    """
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+
+    s = str(x).strip().lower()
+    s = s.replace("chf", "").replace("%", "").strip()
+    s = s.replace(" ", "")              # enlève séparateurs de milliers
+    s = s.replace("\u00a0", "")         # espace insécable
+    s = s.replace(",", ".")             # virgule -> point
+
+    if s == "":
+        return None
+
     try:
-        return f"{int(round(float(n))):,}".replace(",", " ")
+        return float(s)
     except Exception:
-        return str(n)
+        return None
+
+def fmt_int(n):
+    v = _to_float(n)
+    if v is None:
+        return "—" if n is None else str(n)
+    return f"{int(round(v)):,}".replace(",", " ")
 
 def fmt_chf(n, decimals=0):
-    try:
-        v = float(n)
-        if decimals == 0:
-            return f"{int(round(v)):,}".replace(",", " ") + " CHF"
-        return f"{v:,.{decimals}f}".replace(",", " ").replace(".", ",") + " CHF"
-    except Exception:
-        return f"{n} CHF"
+    v = _to_float(n)
+    if v is None:
+        return "—" if n is None else f"{n} CHF"
+
+    if decimals == 0:
+        return f"{int(round(v)):,}".replace(",", " ") + " CHF"
+    return f"{v:,.{decimals}f}".replace(",", " ").replace(".", ",") + " CHF"
 
 def fmt_pct(x, decimals=1):
-    try:
-        v = float(x)
-        return f"{v:.{decimals}f} %".replace(".", ",")
-    except Exception:
-        return f"{x} %"
+    v = _to_float(x)
+    if v is None:
+        return "—" if x is None else f"{x} %"
+    return f"{v:.{decimals}f} %".replace(".", ",")
 
 def safe_get(d, path, default=None):
     """safe_get(d, ['a','b','c'])"""
@@ -342,7 +367,9 @@ def page_synthese(c, pdf):
     # donut image
     donut_path = "donut_tmp.png"
     try:
-        values = [float(avs_m or 0), float(lpp_m or 0)]
+        v0 = _to_float(avs_m) or 0.0
+        v1 = _to_float(lpp_m) or 0.0
+        values = [v0, v1]
         if values[0] + values[1] <= 0:
             values = [1, 1]
         draw_donut_chart(values, ["AVS", "LPP"], donut_path)
@@ -389,7 +416,7 @@ def page_avs(c, avs):
     w2 = (card_w - gap) / 2
     h2 = 3.0*cm
 
-    # Années cotisées / réduction card look like UI
+    # Années validées
     draw_shadow_card(c, card_x, y0, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
     c.setFillColor(BLACK)
     c.setFont("Helvetica-Bold", 11.5)
@@ -397,6 +424,7 @@ def page_avs(c, avs):
     c.setFont("Helvetica-Bold", 20)
     c.drawString(card_x + 1.0*cm, y0 + 1.0*cm, f"{fmt_int(annees_validees)}" if annees_validees is not None else "—")
 
+    # Années manquantes
     x2 = card_x + w2 + gap
     draw_shadow_card(c, x2, y0, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
     c.setFillColor(BLACK)
@@ -407,6 +435,8 @@ def page_avs(c, avs):
 
     # Row 2 cards
     y1 = y0 - (h2 + 1.0*cm)
+
+    # RAMD
     draw_shadow_card(c, card_x, y1, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
     c.setFillColor(BLACK)
     c.setFont("Helvetica-Bold", 11.5)
@@ -414,6 +444,7 @@ def page_avs(c, avs):
     c.setFont("Helvetica-Bold", 18)
     c.drawString(card_x + 1.0*cm, y1 + 1.0*cm, fmt_chf(ramd, 0) if ramd is not None else "—")
 
+    # Réduction
     draw_shadow_card(c, x2, y1, w2, h2, r=14, fill=WHITE, stroke=LIGHT)
     c.setFillColor(BLACK)
     c.setFont("Helvetica-Bold", 11.5)
@@ -422,7 +453,7 @@ def page_avs(c, avs):
     c.setFillColor(DANGER if impact is not None else BLACK)
     c.drawString(x2 + 1.0*cm, y1 + 1.0*cm, f"-{fmt_pct(impact, 1)}" if impact is not None else "—")
 
-    # Detail box (like UI "Détail du calcul")
+    # Detail box
     box_y = y1 - 7.2*cm
     draw_card(c, card_x, box_y, card_w, 6.4*cm, r=16, fill=WHITE, stroke=LIGHT)
 
@@ -430,7 +461,6 @@ def page_avs(c, avs):
     c.setFont("Helvetica-Bold", 12.5)
     c.drawString(card_x + 1.0*cm, box_y + 6.4*cm - 1.1*cm, "Détail du calcul")
 
-    # lines
     lines = [
         ("Rente pour carrière complète", fmt_chf(rente_complete, 0) if rente_complete is not None else "—"),
         ("Rente mensuelle finale", fmt_chf(rente_finale, 0) if rente_finale is not None else "—"),
@@ -445,8 +475,9 @@ def page_avs(c, avs):
         c.drawRightString(card_x + card_w - 1.0*cm, yy, val)
         yy -= 1.1*cm
 
-    # Warning box (années manquantes)
-    if annees_manquantes and float(annees_manquantes) > 0:
+    # Warning box
+    missing = _to_float(annees_manquantes) or 0.0
+    if missing > 0:
         warn_y = box_y - 3.2*cm
         draw_card(c, card_x, warn_y, card_w, 2.6*cm, r=14, fill=WARN_BG, stroke=colors.HexColor("#FDE68A"))
         c.setFillColor(WARN_TX)
@@ -543,17 +574,31 @@ def page_scenarios(c, pdf):
     draw_top_confidential(c, width, height)
     draw_h1(c, "Scénarios", 2*cm, height - 4.2*cm, color=UI_BLUE)
 
-    scenarios = pdf.get("scenarios", {}) if isinstance(pdf, dict) else {}
+    # "scenarios" peut être dict OU list suivant tes versions de resultats["pdf_data"]
+    scenarios = {}
+    if isinstance(pdf, dict):
+        raw = pdf.get("scenarios")
+        if isinstance(raw, dict):
+            scenarios = raw
+        elif isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, dict):
+                    k = item.get("key") or item.get("name") or item.get("type")
+                    if k:
+                        scenarios[str(k)] = item
 
     # Values (if present)
-    sans = scenarios.get("sans_rachat", {})
-    rachat = scenarios.get("rachat_lpp", {})
+    sans = scenarios.get("sans_rachat") or scenarios.get("sans") or {}
+    rachat = scenarios.get("rachat_lpp") or scenarios.get("rachat") or {}
 
     # Top explanatory text
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 10.5)
-    c.drawString(2*cm, height - 5.4*cm,
-                 "Voici les scénarios d'optimisation possibles selon votre situation. Les calculs sont indicatifs et dépendent de votre situation fiscale exacte.")
+    c.drawString(
+        2*cm,
+        height - 5.4*cm,
+        "Voici les scénarios d'optimisation possibles selon votre situation. Les calculs sont indicatifs et dépendent de votre situation fiscale exacte."
+    )
 
     card_x = 2*cm
     card_w = width - 4*cm
@@ -568,7 +613,7 @@ def page_scenarios(c, pdf):
     c.setFont("Helvetica", 10.5)
     c.drawString(card_x + 1.0*cm, y0 + 1.0*cm, "Situation actuelle projetée")
 
-    sans_m = sans.get("rente_mensuelle") or safe_get(pdf, ["synthese", "total_mensuel"])
+    sans_m = (sans.get("rente_mensuelle") if isinstance(sans, dict) else None) or safe_get(pdf, ["synthese", "total_mensuel"])
     c.setFillColor(colors.HexColor("#15803d"))
     c.setFont("Helvetica-Bold", 16)
     if sans_m is not None:
@@ -587,7 +632,7 @@ def page_scenarios(c, pdf):
     c.setFont("Helvetica", 10.5)
     c.drawString(card_x + 1.0*cm, y1 + 2.2*cm, "Rachat étalé sur 5 ans  •  Recommandé")
 
-    rachat_m = rachat.get("rente_mensuelle")
+    rachat_m = (rachat.get("rente_mensuelle") if isinstance(rachat, dict) else None)
     c.setFillColor(colors.HexColor("#15803d"))
     c.setFont("Helvetica-Bold", 16)
     if rachat_m is not None:
@@ -597,12 +642,16 @@ def page_scenarios(c, pdf):
         c.drawRightString(card_x + card_w - 1.0*cm, y1 + 2.1*cm, "rente mensuelle")
 
     # 4 metrics line
+    def rget(key):
+        return rachat.get(key) if isinstance(rachat, dict) else None
+
     metrics = [
-        ("Coût total", rachat.get("cout_total")),
-        ("Économie impôt", rachat.get("economie_impot")),
-        ("Gain mensuel", rachat.get("gain_mensuel")),
-        ("Gain sur 20 ans", rachat.get("gain_20_ans")),
+        ("Coût total", rget("cout_total")),
+        ("Économie impôt", rget("economie_impot")),
+        ("Gain mensuel", rget("gain_mensuel")),
+        ("Gain sur 20 ans", rget("gain_20_ans")),
     ]
+
     mx = card_x + 1.0*cm
     my = y1 + 1.1*cm
     col_w = (card_w - 2.0*cm) / 4
@@ -614,19 +663,23 @@ def page_scenarios(c, pdf):
         c.drawString(x, my + 0.65*cm, lab)
         c.setFillColor(BLACK)
         c.setFont("Helvetica-Bold", 11.5)
+
         if val is None:
             c.drawString(x, my, "—")
-        else:
-            # keep sign for values like -12843
-            try:
-                vv = float(val)
-                if "impôt" in lab.lower() and vv < 0:
-                    c.setFillColor(colors.HexColor("#15803d"))
-                if "gain" in lab.lower() and vv > 0:
-                    c.setFillColor(colors.HexColor("#2563eb"))
-                c.drawString(x, my, fmt_chf(vv, 0).replace(" CHF", " CHF"))
-            except Exception:
-                c.drawString(x, my, str(val))
+            continue
+
+        vv = _to_float(val)
+        if vv is None:
+            c.drawString(x, my, str(val))
+            continue
+
+        # couleurs selon type
+        if "impôt" in lab.lower() and vv < 0:
+            c.setFillColor(colors.HexColor("#15803d"))
+        if "gain" in lab.lower() and vv > 0:
+            c.setFillColor(colors.HexColor("#2563eb"))
+
+        c.drawString(x, my, fmt_chf(vv, 0))
 
     # Next steps box
     y2 = y1 - 5.0*cm
