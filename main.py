@@ -59,6 +59,16 @@ def note_attributes_to_dict(note_attrs):
         return note_attrs
     return {}
 
+def parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    s = str(value).strip().lower()
+    return s in ("1", "true", "vrai", "yes", "y", "oui", "on")
 
 
 # =========================================================
@@ -293,7 +303,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
 
         "rente_conjoint": float(payload.get("rente_conjoint") or 0),
 
-        "has_3eme_pilier": payload.get("has_3eme_pilier") or payload.get("has_3eme_Pilier"),
+        "has_3eme_pilier": parse_bool(payload.get("has_3eme_pilier") or payload.get("has_3eme_Pilier")),
         "type_3eme_pilier": payload.get("type_3eme_pilier") or payload.get("type_3eme_Pilier"),
 
     }
