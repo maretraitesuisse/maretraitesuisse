@@ -12,6 +12,7 @@ import hmac
 import hashlib
 from typing import Optional
 
+from fastapi.responses import FileResponse
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -79,7 +80,7 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
 
     # 🔐 Vérification HMAC Shopify
     body = await request.body()
-    hmac_header = request.headers.get("X-Shopify-Hmac-Sha256")
+    hmac_header = (request.headers.get("X-Shopify-Hmac-Sha256") or "").strip()
 
     if not SHOPIFY_WEBHOOK_SECRET:
         print("❌ SHOPIFY_WEBHOOK_SECRET manquant côté Render")
@@ -362,6 +363,21 @@ def submit(payload: dict, db: Session = Depends(get_db)):
 # ROUTES AVIS
 # =========================================================
 app.include_router(avis_router, prefix="/api/avis")
+
+
+@app.get("/debug/pdf/{simulation_id}")
+def debug_pdf(simulation_id: int, db: Session = Depends(get_db)):
+    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
+    if not simulation:
+        return {"ok": False, "error": "Simulation introuvable"}
+
+    pdf_path = generer_pdf_retraite(
+        donnees=simulation.donnees,
+        resultats=simulation.resultat
+    )
+
+    return FileResponse(pdf_path, media_type="application/pdf", filename="projection_retraite.pdf")
+
 
 # =========================================================
 # PING

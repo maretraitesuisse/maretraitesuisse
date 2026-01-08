@@ -161,31 +161,31 @@ def draw_divider(c, x1, y, x2, color=LIGHT):
     c.setLineWidth(1)
     c.line(x1, y, x2, y)
     
-def draw_gradient_bar(c, x, y, w, h, left_hex="#2563EB", right_hex="#60A5FA", steps=60, radius=6):
+def draw_gradient_bar(c, x, y, w, h, center_hex="#2563EB", edge_hex="#93C5FD", steps=120):
     """
-    Simule un dégradé horizontal en dessinant des petits rectangles.
-    - x,y = bas gauche
-    - w,h = largeur/hauteur
+    Barre style 'avis' : plus intense au centre, fade vers les bords.
+    Simulé par rectangles + alpha-like via interpolation de couleur.
     """
-    # arrondi "visuel" : on fait un clip simple avec roundRect en surcouche
-    # 1) fond arrondi (transparent visuel)
-    c.setFillColor(colors.white)
-    c.setStrokeColor(colors.white)
-    c.roundRect(x, y, w, h, radius, stroke=0, fill=0)
-
     def hex_to_rgb(hx):
         hx = hx.lstrip("#")
         return tuple(int(hx[i:i+2], 16) for i in (0, 2, 4))
 
-    r1, g1, b1 = hex_to_rgb(left_hex)
-    r2, g2, b2 = hex_to_rgb(right_hex)
+    cr, cg, cb = hex_to_rgb(center_hex)
+    er, eg, eb = hex_to_rgb(edge_hex)
 
     step_w = w / steps
+    mid = (steps - 1) / 2.0
+
     for i in range(steps):
-        t = i / max(steps - 1, 1)
-        r = int(r1 + (r2 - r1) * t)
-        g = int(g1 + (g2 - g1) * t)
-        b = int(b1 + (b2 - b1) * t)
+        # distance normalisée au centre (0 au centre, 1 aux bords)
+        d = abs(i - mid) / mid if mid != 0 else 0
+        # courbe douce (plus proche visuellement de ton UI)
+        t = d ** 1.7
+
+        r = int(cr + (er - cr) * t)
+        g = int(cg + (eg - cg) * t)
+        b = int(cb + (eb - cb) * t)
+
         c.setFillColor(colors.Color(r/255, g/255, b/255))
         c.setStrokeColor(colors.Color(r/255, g/255, b/255))
         c.rect(x + i * step_w, y, step_w + 0.2, h, stroke=0, fill=1)
@@ -259,6 +259,9 @@ def page_cover(c, donnees):
     date_str = today.strftime("%d/%m/%Y")
     year = today.year
 
+    SHIFT_Y = -2.0 * cm   # NEGATIF = on descend. Ajuste: -1.5cm / -2.5cm etc.
+
+
     # =========================================================
     # FOND (non blanc)
     # =========================================================
@@ -295,7 +298,8 @@ def page_cover(c, donnees):
     # LOGO (centré, sur fond clair, sous le bandeau)
     # =========================================================
     logo_path = asset_path("logo.png")
-    logo_y = height - header_h - 2.6*cm
+    logo_y = height - header_h - 2.6*cm + SHIFT_Y
+
 
     if os.path.exists(logo_path):
         img = ImageReader(logo_path)
@@ -324,6 +328,7 @@ def page_cover(c, donnees):
     # =========================================================
     title_y = logo_y - 2.0*cm
 
+
     c.setFillColor(PRIMARY)
     c.setFont("Helvetica-Bold", 22)
     c.drawCentredString(width/2, title_y, "PROJECTION RETRAITE CERTIFIÉE")
@@ -334,18 +339,18 @@ def page_cover(c, donnees):
 
     # trait gradient (petit, centré)
     bar_w = 4.6 * cm
-    bar_h = 0.22 * cm
+    bar_h = 0.12 * cm
     bar_x = (width - bar_w) / 2
     bar_y = title_y - 1.75 * cm
     draw_gradient_bar(
         c,
         bar_x, bar_y,
         bar_w, bar_h,
-        left_hex="#1F3C88",   # bleu pro
-        right_hex="#60A5FA",  # bleu clair
-        steps=70,
-        radius=10
+        center_hex="#2563EB",
+        edge_hex="#BFDBFE",
+        steps=140
     )
+
 
     # =========================================================
     # CARTE CLIENT (blanche + ombre) comme tes cards UI (img3)
