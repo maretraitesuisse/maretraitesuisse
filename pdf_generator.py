@@ -259,7 +259,7 @@ def page_cover(c, donnees):
     date_str = today.strftime("%d/%m/%Y")
     year = today.year
 
-    SHIFT_Y = -2.0 * cm   # NEGATIF = on descend. Ajuste: -1.5cm / -2.5cm etc.
+    SHIFT_Y = -4.0 * cm   # NEGATIF = on descend. Ajuste: -1.5cm / -2.5cm etc.
 
 
     # =========================================================
