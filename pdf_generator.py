@@ -260,6 +260,7 @@ def page_cover(c, donnees):
     year = today.year
 
     SHIFT_Y = -4.0 * cm   # NEGATIF = on descend. Ajuste: -1.5cm / -2.5cm etc.
+    CARD_SHIFT_Y = -5.5 * cm  # négatif = on descend la carte uniquement
 
 
     # =========================================================
@@ -356,28 +357,54 @@ def page_cover(c, donnees):
     # CARTE CLIENT (blanche + ombre) comme tes cards UI (img3)
     # =========================================================
     card_w = width * 0.70
-    card_h = 4.4 * cm
+    card_h = 7.7 * cm
     card_x = (width - card_w) / 2
-    card_y = bar_y - 5.2 * cm
+    card_y = bar_y - 5.2 * cm + CARD_SHIFT_Y
+
 
     # ombre + carte
     draw_shadow_card(c, card_x, card_y, card_w, card_h, r=16, fill=WHITE, stroke=LIGHT)
 
     # contenu
+    # contenu (lignes propres)
+    x = card_x + 1.2*cm
+    y = card_y + card_h - 1.35*cm
+    line = 0.95*cm  # espacement entre lignes
+
     c.setFillColor(BLACK)
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(card_x + 1.2*cm, card_y + card_h - 1.35*cm, f"Client : {prenom} {nom}".strip())
+    c.drawString(x, y, f"Client : {prenom} {nom}".strip())
 
     c.setFont("Helvetica", 11)
-    c.setFillColor(BLACK)
+    y -= line
     if age_actuel is not None:
-        c.drawString(card_x + 1.2*cm, card_y + card_h - 2.40*cm, f"Âge actuel : {age_actuel} ans")
-    if age_retraite is not None:
-        c.drawString(card_x + 1.2*cm, card_y + card_h - 3.25*cm, f"Départ prévu : {age_retraite} ans")
+        c.drawString(x, y, f"Âge actuel : {age_actuel} ans")
 
+    y -= line
+    if age_retraite is not None:
+        c.drawString(x, y, f"Départ prévu : {age_retraite} ans")
+
+    # ligne "rapport généré" propre, plus petite et grise
+    y -= line
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 10)
-    c.drawString(card_x + 1.2*cm, card_y + 0.95*cm, f"Rapport généré le : {date_str}")
+    c.drawString(x, y, f"Rapport généré le : {date_str}")
+
+    y -= line
+    c.setFillColor(BLACK)
+    c.setFont("Helvetica", 11)
+    c.drawString(x, y, f"Année de référence : {year}")
+
+    y -= line
+    c.drawString(x, y, "Type de rapport : Projection AVS & LPP (estimative)")
+
+    # Référence dossier (simple et pro)
+    ref = f"MRS-{today.strftime('%Y%m%d')}-{(prenom[:1] + nom[:1]).upper() if prenom and nom else 'XX'}"
+    y -= line
+    c.setFillColor(GRAY)
+    c.setFont("Helvetica", 10)
+    c.drawString(x, y, f"Référence : {ref}")
+
 
     # =========================================================
     # BANDEAU BAS (fin, pas épais) + mentions
