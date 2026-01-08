@@ -26,6 +26,8 @@ GRAY    = colors.HexColor("#6b7280")
 LIGHT   = colors.HexColor("#e5e7eb")
 MUTED   = colors.HexColor("#f3f4f6")
 WHITE   = colors.white
+BG      = colors.HexColor("#F5F7FA")  # gris très clair (pro, imprimable)
+
 
 SUCCESS_BG = colors.HexColor("#16a34a")
 SUCCESS_TX = colors.white
@@ -158,6 +160,36 @@ def draw_divider(c, x1, y, x2, color=LIGHT):
     c.setStrokeColor(color)
     c.setLineWidth(1)
     c.line(x1, y, x2, y)
+    
+def draw_gradient_bar(c, x, y, w, h, left_hex="#2563EB", right_hex="#60A5FA", steps=60, radius=6):
+    """
+    Simule un dégradé horizontal en dessinant des petits rectangles.
+    - x,y = bas gauche
+    - w,h = largeur/hauteur
+    """
+    # arrondi "visuel" : on fait un clip simple avec roundRect en surcouche
+    # 1) fond arrondi (transparent visuel)
+    c.setFillColor(colors.white)
+    c.setStrokeColor(colors.white)
+    c.roundRect(x, y, w, h, radius, stroke=0, fill=0)
+
+    def hex_to_rgb(hx):
+        hx = hx.lstrip("#")
+        return tuple(int(hx[i:i+2], 16) for i in (0, 2, 4))
+
+    r1, g1, b1 = hex_to_rgb(left_hex)
+    r2, g2, b2 = hex_to_rgb(right_hex)
+
+    step_w = w / steps
+    for i in range(steps):
+        t = i / max(steps - 1, 1)
+        r = int(r1 + (r2 - r1) * t)
+        g = int(g1 + (g2 - g1) * t)
+        b = int(b1 + (b2 - b1) * t)
+        c.setFillColor(colors.Color(r/255, g/255, b/255))
+        c.setStrokeColor(colors.Color(r/255, g/255, b/255))
+        c.rect(x + i * step_w, y, step_w + 0.2, h, stroke=0, fill=1)
+
 
 
 # ===============================================================
@@ -227,70 +259,141 @@ def page_cover(c, donnees):
     date_str = today.strftime("%d/%m/%Y")
     year = today.year
 
-    # subtle top divider
-    draw_divider(c, width*0.22, height - 2.2*cm, width*0.78)
+    # =========================================================
+    # FOND (non blanc)
+    # =========================================================
+    c.setFillColor(BG)
+    c.rect(0, 0, width, height, stroke=0, fill=1)
 
-    # Logo centered
+    # =========================================================
+    # HEADER demi-bannière + coupe diagonale (triangle)
+    # =========================================================
+    header_h = 4.2 * cm
+
+    # grand bandeau bleu en haut avec diagonale (comme ton img2)
+    c.setFillColor(PRIMARY)
+    c.setStrokeColor(PRIMARY)
+    c.setLineWidth(0)
+
+    # Polygone : haut plein, bas coupé en diagonale
+    # (gauche plus bas, droite plus haut) -> look "triangle"
+    
+    p = c.beginPath()
+    p.moveTo(0, height)
+    p.lineTo(width, height)
+    p.lineTo(width, height - header_h)
+    p.lineTo(0, height - header_h * 0.55)
+    p.close()
+    c.drawPath(p, stroke=0, fill=1)
+
+    # petit filet clair sous le header (léger)
+    c.setStrokeColor(LIGHT)
+    c.setLineWidth(1)
+    c.line(2.2*cm, height - header_h - 0.25*cm, width - 2.2*cm, height - header_h - 0.25*cm)
+
+    # =========================================================
+    # LOGO (centré, sur fond clair, sous le bandeau)
+    # =========================================================
     logo_path = asset_path("logo.png")
-    logo_drawn = False
+    logo_y = height - header_h - 2.6*cm
+
     if os.path.exists(logo_path):
         img = ImageReader(logo_path)
         iw, ih = img.getSize()
-        target_w = 7.2 * cm
+        target_w = 6.5 * cm
         scale = target_w / float(iw)
         target_h = ih * scale
+        c.drawImage(
+            logo_path,
+            (width - target_w) / 2,
+            logo_y,
+            width=target_w,
+            height=target_h,
+            mask="auto"
+        )
+        logo_block_h = target_h
+    else:
+        # fallback texte si logo absent
+        c.setFillColor(PRIMARY)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(width/2, logo_y + 0.8*cm, "MA RETRAITE SUISSE")
+        logo_block_h = 1.2*cm
 
-        x = (width - target_w) / 2
-        y = height - 6.2 * cm
-        c.drawImage(logo_path, x, y, width=target_w, height=target_h, mask="auto")
-        logo_drawn = True
+    # =========================================================
+    # TITRE / SOUS-TITRE + TRAIT GRADIENT (comme page avis)
+    # =========================================================
+    title_y = logo_y - 2.0*cm
 
-    title_y = height - (9.3 * cm if logo_drawn else 6.5 * cm)
-
-    # Title
-    c.setFont("Helvetica-Bold", 22)
     c.setFillColor(PRIMARY)
+    c.setFont("Helvetica-Bold", 22)
     c.drawCentredString(width/2, title_y, "PROJECTION RETRAITE CERTIFIÉE")
 
-    # Subtitle
+    c.setFillColor(BLACK)
     c.setFont("Helvetica", 13)
+    c.drawCentredString(width/2, title_y - 1.0*cm, "Analyse personnalisée AVS & LPP")
+
+    # trait gradient (petit, centré)
+    bar_w = 4.6 * cm
+    bar_h = 0.22 * cm
+    bar_x = (width - bar_w) / 2
+    bar_y = title_y - 1.75 * cm
+    draw_gradient_bar(
+        c,
+        bar_x, bar_y,
+        bar_w, bar_h,
+        left_hex="#1F3C88",   # bleu pro
+        right_hex="#60A5FA",  # bleu clair
+        steps=70,
+        radius=10
+    )
+
+    # =========================================================
+    # CARTE CLIENT (blanche + ombre) comme tes cards UI (img3)
+    # =========================================================
+    card_w = width * 0.70
+    card_h = 4.4 * cm
+    card_x = (width - card_w) / 2
+    card_y = bar_y - 5.2 * cm
+
+    # ombre + carte
+    draw_shadow_card(c, card_x, card_y, card_w, card_h, r=16, fill=WHITE, stroke=LIGHT)
+
+    # contenu
     c.setFillColor(BLACK)
-    c.drawCentredString(width/2, title_y - 1.2*cm, "Analyse personnalisée AVS & LPP")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(card_x + 1.2*cm, card_y + card_h - 1.35*cm, f"Client : {prenom} {nom}".strip())
 
-    # Client box
-    box_w = width * 0.70
-    box_h = 4.2 * cm
-    box_x = (width - box_w) / 2
-    box_y = title_y - 7.4 * cm
-
-    draw_card(c, box_x, box_y, box_w, box_h, r=14, fill=WHITE, stroke=LIGHT)
-
+    c.setFont("Helvetica", 11)
     c.setFillColor(BLACK)
-    c.setFont("Helvetica-Bold", 12.5)
-    c.drawString(box_x + 1.3*cm, box_y + box_h - 1.35*cm, f"Client : {prenom} {nom}".strip())
-
-    c.setFont("Helvetica", 11.2)
     if age_actuel is not None:
-        c.drawString(box_x + 1.3*cm, box_y + box_h - 2.45*cm, f"Âge actuel : {age_actuel} ans")
+        c.drawString(card_x + 1.2*cm, card_y + card_h - 2.40*cm, f"Âge actuel : {age_actuel} ans")
     if age_retraite is not None:
-        c.drawString(box_x + 1.3*cm, box_y + box_h - 3.25*cm, f"Départ prévu : {age_retraite} ans")
+        c.drawString(card_x + 1.2*cm, card_y + card_h - 3.25*cm, f"Départ prévu : {age_retraite} ans")
 
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 10)
-    c.drawString(box_x + 1.3*cm, box_y + 0.9*cm, f"Rapport généré le : {date_str}")
+    c.drawString(card_x + 1.2*cm, card_y + 0.95*cm, f"Rapport généré le : {date_str}")
 
-    # Legal
+    # =========================================================
+    # BANDEAU BAS (fin, pas épais) + mentions
+    # =========================================================
+    footer_band_h = 0.55 * cm
+    c.setFillColor(PRIMARY)
+    c.rect(0, 0, width, footer_band_h, stroke=0, fill=1)
+
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 8.5)
     c.drawCentredString(
         width/2,
-        2.1*cm,
+        footer_band_h + 0.95*cm,
         "Ce rapport fournit une estimation indicative basée sur les informations déclarées et ne constitue pas un conseil financier contractuel."
     )
+
     c.setFont("Helvetica", 9)
-    c.drawCentredString(width/2, 1.2*cm, f"www.maretraitesuisse.ch — © {year} Ma Retraite Suisse")
+    c.drawCentredString(width/2, footer_band_h + 0.35*cm, f"www.maretraitesuisse.ch — © {year} Ma Retraite Suisse")
 
     c.showPage()
+
 
 
 # ===============================================================
