@@ -475,7 +475,7 @@ def page_synthese(c, pdf):
     # Bloc orange (données AVS détail)
     annees_manquantes = avs_detail.get("annees_manquantes")
     impact_pct = avs_detail.get("impact_pct")
-    rente_complete = avs_detail.get("rente_complete")
+    rente_complete = 2520.0  # FORCÉ (à revoir plus tard)
     rente_finale = avs_detail.get("rente_finale")
 
     # perte sur 20 ans = (écart mensuel) * 12 * 20
@@ -719,14 +719,20 @@ def page_avs(c, avs):
     annees_manquantes = avs.get("annees_manquantes")
     ramd = avs.get("ramd")
 
-    rente_complete = avs.get("rente_complete")
+    rente_complete = 2520.0
     rente_finale = avs.get("rente_finale")
 
     impact = avs.get("impact_pct")  # ex: 20.4
-    bonifications = avs.get("bonifications", 0)
+    bonifications = avs.get("bonifications", 0) or 0
 
-    # Optionnel (si tu l'ajoutes plus tard dans pdf_data["avs_detail"])
     salaire_moyen = avs.get("salaire_moyen") or avs.get("salaire_moyen_carriere")
+
+    # Fallback: si salaire_moyen absent, on estime depuis RAMD (car RAMD = salaire_moyen + bonifications)
+    if salaire_moyen is None:
+        ramd_val = _to_float(avs.get("ramd"))
+        bonif_val = _to_float(bonifications) or 0.0
+        if ramd_val is not None:
+            salaire_moyen = max(0.0, ramd_val - bonif_val)
 
     # Réduction théorique demandée: X années * 2.27%
     missing = int(_to_float(annees_manquantes) or 0)
@@ -819,8 +825,8 @@ def page_avs(c, avs):
 
     # Lignes demandées
     rows = [
-        ("Salaire moyen de carrière", fmt_chf(salaire_moyen, 0) if salaire_moyen is not None else "—"),
-        ("Bonifications (éducation + assistance)", (("+" + fmt_chf(bonifications, 0)) if _to_float(bonifications) not in (None, 0) else "—")),
+        ("Salaire moyen de carrière", fmt_chf(salaire_moyen, 0) if salaire_moyen is not None else fmt_chf(0, 0)),
+        ("Bonifications (éducation + assistance)", (("+" + fmt_chf(bonifications, 0)) if (_to_float(bonifications) not in (None,) and _to_float(bonifications) > 0) else fmt_chf(0, 0))),
         ("RAMD calculé", fmt_chf(ramd, 0) if ramd is not None else "—"),
         ("Rente pour carrière complète", fmt_chf(rente_complete, 0) if rente_complete is not None else "—"),
         (f"Réduction ({missing} année{'s' if missing > 1 else ''} × 2,27%)", (f"-{fmt_pct(reduc_theorique, 1)}" if missing > 0 else "—")),
@@ -1276,6 +1282,11 @@ def generer_pdf_retraite(donnees, resultats, output="projection_retraite.pdf"):
     Attend resultats["pdf_data"] comme avant.
     """
     pdf = resultats.get("pdf_data", {}) if isinstance(resultats, dict) else {}
+    print("DEBUG keys resultats:", list(resultats.keys()) if isinstance(resultats, dict) else type(resultats))
+    print("DEBUG pdf keys:", list(pdf.keys()) if isinstance(pdf, dict) else type(pdf))
+    print("DEBUG rente_complete dans pdf:", pdf.get("avs_detail", {}).get("rente_complete"))
+    print("DEBUG salaire_moyen_carriere:", pdf.get("avs_detail", {}).get("salaire_moyen_carriere"))
+    print("DEBUG bonifications:", pdf.get("avs_detail", {}).get("bonifications"))
 
     c = canvas.Canvas(output, pagesize=A4)
 

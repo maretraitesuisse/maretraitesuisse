@@ -23,6 +23,7 @@ class ConfigAVS:
     PLAFOND_COUPLE: float = 3780.0
     BONIF_CREDIT_ANNUEL: float = 45360.0
     REDUCTION_PAR_ANNEE: float = 0.0227
+    
 
 
 @dataclass
