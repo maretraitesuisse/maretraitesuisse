@@ -19,11 +19,14 @@ from sqlalchemy.orm import Session
 
 from database import engine, get_db
 from simulateur_avs_lpp import calcul_complet_retraite
-from models.models import Base, Client, Simulation
+from models.models import Base, Client, Simulation, WebhookDelivery
 from routes.avis import router as avis_router
 from fastapi import Request
 from pdf_generator import generer_pdf_retraite
 
+from sqlalchemy.exc import IntegrityError
+from fastapi import BackgroundTasks
+from database import SessionLocal
 
 
 
@@ -76,7 +79,12 @@ def parse_bool(value) -> bool:
 # WEBHOOK
 # =========================================================
 @app.post("/webhook/shopify-paid")
-async def shopify_paid(request: Request, db: Session = Depends(get_db)):
+async def shopify_paid(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+
 
     # 🔐 Vérification HMAC Shopify
     body = await request.body()
@@ -118,6 +126,22 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
 
     order_id = order.get("id")
     print("🧾 order_id:", order_id, "| webhook_id:", webhook_id)
+
+    if not webhook_id:
+        webhook_id = f"no-id:{order_id}"
+
+
+    # =========================================================
+    # IDEMPOTENCE — empêcher doublons webhook
+    # =========================================================
+    try:
+        db.add(WebhookDelivery(webhook_id=webhook_id, order_id=str(order_id)))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        print("🟡 Webhook déjà traité, on ignore :", webhook_id)
+        return {"ok": True}
+
 
 
     attrs = note_attributes_to_dict(order.get("note_attributes") or [])
@@ -191,25 +215,17 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
         print("❌ Aucune simulation trouvée (ni par simulation_id, ni par email)")
         return {"ok": False}
 
+    prenom = (client.prenom if client else "").strip()
 
-    # 🧾 PDF
-    pdf_path = generer_pdf_retraite(
-        donnees=simulation.donnees,
-        resultats=simulation.resultat
+    background_tasks.add_task(
+    process_paid_order,
+    simulation.id,
+    email_final,
+    prenom
     )
 
-    # 📧 Envoi email premium
-    envoyer_email_avec_pdf(
-        template_id=2,
-        email=email_final,          # ✅ important
-        prenom=(client.prenom if client else (attrs.get("form_prenom") or "")).strip(),
-        pdf_path=pdf_path
-)
-
-
-    print("✅ PDF envoyé à", email_final)
-
     return {"ok": True}
+
 
 # =========================================================
 # CONFIG BREVO
@@ -364,8 +380,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(simulation)
 
-    # EMAIL (⬅️ INDENTATION CORRECTE)
-    envoyer_email(1, client.email, client.prenom)
+    
 
     return {
         "success": True,
@@ -391,6 +406,34 @@ def debug_pdf(simulation_id: int, db: Session = Depends(get_db)):
     )
 
     return FileResponse(pdf_path, media_type="application/pdf", filename="projection_retraite.pdf")
+
+
+# =========================================================
+# BACKGROUND TASK PAIEMENT
+# =========================================================
+def process_paid_order(simulation_id: int, email_final: str, prenom: str):
+    db = SessionLocal()
+    try:
+        simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
+        if not simulation:
+            print("❌ simulation introuvable en background")
+            return
+
+        pdf_path = generer_pdf_retraite(
+            donnees=simulation.donnees,
+            resultats=simulation.resultat
+        )
+
+        # ✅ Email confirmation après paiement
+        envoyer_email(1, email_final, prenom)
+
+        # ✅ Email premium avec PDF
+        envoyer_email_avec_pdf(2, email_final, prenom, pdf_path)
+
+        print("✅ Emails envoyés à", email_final)
+
+    finally:
+        db.close()
 
 
 # =========================================================

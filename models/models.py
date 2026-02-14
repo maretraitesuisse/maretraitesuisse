@@ -62,3 +62,11 @@ class Simulation(Base):
     resultat = Column(JSONB)
 
     created_at = Column(DateTime, server_default=func.now())
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True)
+    webhook_id = Column(String, nullable=False, unique=True)
+    order_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
