@@ -80,6 +80,16 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
 
     # 🔐 Vérification HMAC Shopify
     body = await request.body()
+
+    # =========================
+    # DEBUG SHOPIFY HEADERS
+    # =========================
+    webhook_id = (request.headers.get("X-Shopify-Webhook-Id") or "").strip()
+    topic = (request.headers.get("X-Shopify-Topic") or "").strip()
+    shop_domain = (request.headers.get("X-Shopify-Shop-Domain") or "").strip()
+    print("🔁 Shopify webhook delivery:", {"webhook_id": webhook_id, "topic": topic, "shop": shop_domain})
+
+    
     hmac_header = (request.headers.get("X-Shopify-Hmac-Sha256") or "").strip()
 
     if not SHOPIFY_WEBHOOK_SECRET:
@@ -105,6 +115,10 @@ async def shopify_paid(request: Request, db: Session = Depends(get_db)):
     # 🔄 Payload
     payload = await request.json()
     order = payload.get("order", payload)
+
+    order_id = order.get("id")
+    print("🧾 order_id:", order_id, "| webhook_id:", webhook_id)
+
 
     attrs = note_attributes_to_dict(order.get("note_attributes") or [])
     simulation_id_attr = (attrs.get("simulation_id") or "").strip()
