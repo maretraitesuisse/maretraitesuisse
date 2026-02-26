@@ -48,6 +48,7 @@ class Simulation(Base):
     salaire_moyen = Column(Numeric)
 
     annees_cotisees = Column(Integer)
+    annees_cotisees_lpp = Column(Integer)
     annees_be = Column(Integer)
     annees_ba = Column(Integer)
 

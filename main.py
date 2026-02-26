@@ -327,6 +327,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         "salaire_moyen": float(payload.get("salaire_moyen") or 0),
 
         "annees_cotisees": int(payload.get("annees_cotisees") or 0),
+        "annees_cotisees_lpp": int(payload.get("annees_cotisees_lpp") or 0),
         "annees_be": int(payload.get("annees_be") or 0),
         "annees_ba": int(payload.get("annees_ba") or 0),
 
@@ -366,6 +367,7 @@ def submit(payload: dict, db: Session = Depends(get_db)):
         salaire_actuel=data["salaire_actuel"],
         salaire_moyen=data["salaire_moyen"],
         annees_cotisees=data["annees_cotisees"],
+        annees_cotisees_lpp=data["annees_cotisees_lpp"],
         annees_be=data["annees_be"],
         annees_ba=data["annees_ba"],
         capital_lpp=data["capital_lpp"],
