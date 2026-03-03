@@ -4,31 +4,22 @@ print("=== Backend MaretraiteSuisse chargé ===")
 # IMPORTS
 # =========================================================
 import os
-import time
-import uuid
 import base64
 import requests
 import hmac
 import hashlib
-from typing import Optional
 
+from fastapi import FastAPI, Depends, Request, BackgroundTasks
 from fastapi.responses import FileResponse
-from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
-from database import engine, get_db
+from database import engine, get_db, SessionLocal
 from simulateur_avs_lpp import calcul_complet_retraite
 from models.models import Base, Client, Simulation, WebhookDelivery
 from routes.avis import router as avis_router
-from fastapi import Request
 from pdf_generator import generer_pdf_retraite
-
-from sqlalchemy.exc import IntegrityError
-from fastapi import BackgroundTasks
-from database import SessionLocal
-
-
 
 
 # =========================================================
@@ -73,6 +64,93 @@ def parse_bool(value) -> bool:
 
     s = str(value).strip().lower()
     return s in ("1", "true", "vrai", "yes", "y", "oui", "on")
+
+def mask_email(email: str) -> str:
+    if not email or "@" not in email:
+        return ""
+    name, domain = email.split("@", 1)
+
+    name_mask = name[0] + "***" if len(name) > 1 else "***"
+    domain_mask = domain[0] + "***" if len(domain) > 1 else "***"
+
+    return f"{name_mask}@{domain_mask}"
+
+# =========================================================
+# CONFIG BREVO
+# =========================================================
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
+
+SENDER = {
+    "email": "noreply@maretraitesuisse.ch",
+    "name": "Ma Retraite Suisse"
+}
+
+def envoyer_email(template_id: int, email: str, prenom: str):
+    if not BREVO_API_KEY:
+        print("❌ BREVO_API_KEY manquant côté Render")
+        return
+
+    payload = {
+        "templateId": template_id,
+        "to": [{"email": email}],
+        "params": {"prenom": prenom},
+        "sender": SENDER
+    }
+
+    resp = requests.post(
+        BREVO_URL,
+        json=payload,
+        headers={
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json"
+        }
+    )
+
+    print("📨 Brevo status:", resp.status_code)
+    try:
+        print("📨 Brevo body:", resp.json())
+    except Exception:
+        print("📨 Brevo body (raw):", resp.text)
+
+    
+
+def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
+    if not BREVO_API_KEY:
+        print("❌ BREVO_API_KEY manquant côté Render")
+        return
+
+    with open(pdf_path, "rb") as f:
+        pdf_content = base64.b64encode(f.read()).decode()
+
+    payload = {
+        "templateId": template_id,
+        "to": [{"email": email}],
+        "params": {"prenom": prenom},
+        "sender": SENDER,
+        "attachment": [{
+            "content": pdf_content,
+            "name": "Projection_Retraite_MaRetraiteSuisse.pdf"
+        }]
+    }
+
+    resp = requests.post(
+        BREVO_URL,
+        json=payload,
+        headers={
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json"
+        }
+    )
+
+    print("📨 Brevo status:", resp.status_code)
+    try:
+        print("📨 Brevo body:", resp.json())
+    except Exception:
+        print("📨 Brevo body (raw):", resp.text)
 
 
 # =========================================================
@@ -164,13 +242,13 @@ async def shopify_paid(
         return {"ok": False}
 
 
-    print("🧾 order_id:", order.get("id"))
+    
     print("🧾 order_name:", order.get("name"))
 
-    print("📦 note_attributes:", attrs)
+    print("📦 note_attributes keys:", list(attrs.keys()))
     print("🆔 simulation_id_attr:", simulation_id_attr)
-    print("📧 email_shopify:", email_shopify)
-    print("📧 email_final:", email_final)
+    print("📧 email_shopify:", mask_email(email_shopify))
+    print("📧 email_final:", mask_email(email_final))
 
     simulation = None
     client = None
@@ -227,82 +305,6 @@ async def shopify_paid(
     return {"ok": True}
 
 
-# =========================================================
-# CONFIG BREVO
-# =========================================================
-BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-BREVO_URL = "https://api.brevo.com/v3/smtp/email"
-SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
-
-SENDER = {
-    "email": "noreply@maretraitesuisse.ch",
-    "name": "Ma Retraite Suisse"
-}
-
-def envoyer_email(template_id: int, email: str, prenom: str):
-    if not BREVO_API_KEY:
-        print("❌ BREVO_API_KEY manquant côté Render")
-        return
-
-    payload = {
-        "templateId": template_id,
-        "to": [{"email": email}],
-        "params": {"prenom": prenom},
-        "sender": SENDER
-    }
-
-    resp = requests.post(
-        BREVO_URL,
-        json=payload,
-        headers={
-            "accept": "application/json",
-            "api-key": BREVO_API_KEY,
-            "content-type": "application/json"
-        }
-    )
-
-    print("📨 Brevo status:", resp.status_code)
-    try:
-        print("📨 Brevo body:", resp.json())
-    except Exception:
-        print("📨 Brevo body (raw):", resp.text)
-
-    
-
-def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
-    if not BREVO_API_KEY:
-        print("❌ BREVO_API_KEY manquant côté Render")
-        return
-
-    with open(pdf_path, "rb") as f:
-        pdf_content = base64.b64encode(f.read()).decode()
-
-    payload = {
-        "templateId": template_id,
-        "to": [{"email": email}],
-        "params": {"prenom": prenom},
-        "sender": SENDER,
-        "attachment": [{
-            "content": pdf_content,
-            "name": "Projection_Retraite_MaRetraiteSuisse.pdf"
-        }]
-    }
-
-    resp = requests.post(
-        BREVO_URL,
-        json=payload,
-        headers={
-            "accept": "application/json",
-            "api-key": BREVO_API_KEY,
-            "content-type": "application/json"
-        }
-    )
-
-    print("📨 Brevo status:", resp.status_code)
-    try:
-        print("📨 Brevo body:", resp.json())
-    except Exception:
-        print("📨 Brevo body (raw):", resp.text)
 
 
 # =========================================================
