@@ -924,6 +924,9 @@ def page_avs(c, avs):
 
     draw_footer(c, width)
     c.showPage()
+
+
+
 # ===============================================================
 # P4 — LPP DÉTAILLÉ
 # ===============================================================
@@ -1336,6 +1339,14 @@ def generer_pdf_retraite(donnees, resultats, output="projection_retraite.pdf"):
 
     # P4
     lpp_detail = pdf.get("lpp_detail", {})
+
+    # Fallback années restantes si absent
+    if lpp_detail.get("annees_restantes") is None:
+        a0 = _to_float(donnees.get("age_actuel"))
+        ar = _to_float(donnees.get("age_retraite"))
+        if a0 is not None and ar is not None:
+            lpp_detail["annees_restantes"] = max(0, int(round(ar - a0)))
+
     page_lpp(c, lpp_detail)
 
     # P5
