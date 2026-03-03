@@ -604,7 +604,7 @@ def page_synthese(c, pdf):
     bottom_pad = 0.6 * cm * scale
     warn_y = container_y + pad + bottom_pad if missing > 0 else None
 
-        # =========================================================
+    # =========================================================
     # DONUT (auto-fit entre AVS/LPP et ORANGE)
     # => impossible de manger AVS/LPP
     # =========================================================
@@ -744,7 +744,7 @@ def page_avs(c, avs):
     rente_complete = 2520.0
     rente_finale = avs.get("rente_finale")
 
-    impact = avs.get("impact_pct")  # ex: 20.4
+    
     bonifications = avs.get("bonifications", 0) or 0
 
     salaire_moyen = avs.get("salaire_moyen") or avs.get("salaire_moyen_carriere")
@@ -756,14 +756,21 @@ def page_avs(c, avs):
         if ramd_val is not None:
             salaire_moyen = max(0.0, ramd_val - bonif_val)
 
-    # Réduction théorique demandée: X années * 2.27%
+    # =========================
+    # Réduction (source de vérité)
+    # =========================
     missing = int(_to_float(annees_manquantes) or 0)
-    reduc_theorique = missing * 2.27  # en %
+
+    LACUNE_RATE = 2.30  # % par année manquante (TA RÈGLE)
+    reduc_calc = missing * LACUNE_RATE  # ex: 14 * 2.30 = 32.2
+    rate_txt = f"{LACUNE_RATE:.2f}".replace(".", ",")  # "2,30"
 
     # =========================
-    # 4 cartes KPI (2x2)
+    # KPI Réduction (on affiche reduc_calc, pas impact_pct)
     # =========================
-        # =========================
+    reduc_display = reduc_calc if missing > 0 else None
+
+    # =========================
     # 4 cartes KPI (2x2) — version demandée
     # =========================
     gap = 0.8 * cm
@@ -780,9 +787,7 @@ def page_avs(c, avs):
     cotise_str = f"{val_ok}/44" if val_ok > 0 else "—/44"
 
     rente_avs_m = rente_finale  # CHF
-    reduc_display = _to_float(impact)
-    if reduc_display is None:
-        reduc_display = reduc_theorique if val_missing > 0 else None
+    
 
     # --- Carte 1: Années cotisées (35/44) + sous-texte "9 années manquantes"
     draw_shadow_card(c, x1, y0, card_w, card_h, r=14, fill=WHITE, stroke=LIGHT)
@@ -851,7 +856,11 @@ def page_avs(c, avs):
         ("Bonifications (éducation + assistance)", (("+" + fmt_chf(bonifications, 0)) if (_to_float(bonifications) not in (None,) and _to_float(bonifications) > 0) else fmt_chf(0, 0))),
         ("RAMD calculé", fmt_chf(ramd, 0) if ramd is not None else "—"),
         ("Rente pour carrière complète", fmt_chf(rente_complete, 0) if rente_complete is not None else "—"),
-        (f"Réduction ({missing} année{'s' if missing > 1 else ''} × 2,27%)", (f"-{fmt_pct(reduc_theorique, 1)}" if missing > 0 else "—")),
+
+        (
+            f"Réduction ({missing} année{'s' if missing > 1 else ''} × {rate_txt}%)",
+            f"-{fmt_pct(reduc_calc, 1)}" if missing > 0 else "—"
+        ),
         ("Rente mensuelle finale", fmt_chf(rente_finale, 0) if rente_finale is not None else "—"),
     ]
 
@@ -894,7 +903,6 @@ def page_avs(c, avs):
         warn_h = 2.6 * cm
         warn_y = box_y - (0.9 * cm + warn_h)
 
-        # sécurité: ne pas sortir du container
         min_y = container_y + pad
         if warn_y < min_y:
             warn_y = min_y
@@ -902,17 +910,20 @@ def page_avs(c, avs):
         draw_card(c, inner_x, warn_y, inner_w, warn_h, r=14, fill=WARN_BG, stroke=colors.HexColor("#FDE68A"))
         c.setFillColor(WARN_TX)
         c.setFont("Helvetica-Bold", 11.5)
-        c.drawString(inner_x + 1.0 * cm, warn_y + 1.65 * cm, f"{missing} année{'s' if missing > 1 else ''} manquante{'s' if missing > 1 else ''}")
+        c.drawString(
+            inner_x + 1.0 * cm,
+            warn_y + 1.65 * cm,
+            f"{missing} année{'s' if missing > 1 else ''} manquante{'s' if missing > 1 else ''}"
+        )
         c.setFont("Helvetica", 10.5)
-        ip = _to_float(impact)
-        if ip is None:
-            ip = reduc_theorique if missing > 0 else None
-        c.drawString(inner_x + 1.0 * cm, warn_y + 0.85 * cm, f"Votre rente AVS est réduite de {fmt_pct(ip, 1) if ip is not None else '—'}.")
+        c.drawString(
+            inner_x + 1.0 * cm,
+            warn_y + 0.85 * cm,
+            f"Votre rente AVS est réduite de {fmt_pct(reduc_calc, 1)}."
+        )
 
     draw_footer(c, width)
     c.showPage()
-
-
 # ===============================================================
 # P4 — LPP DÉTAILLÉ
 # ===============================================================
@@ -1309,7 +1320,8 @@ def generer_pdf_retraite(donnees, resultats, output="projection_retraite.pdf"):
     print("DEBUG rente_complete dans pdf:", pdf.get("avs_detail", {}).get("rente_complete"))
     print("DEBUG salaire_moyen_carriere:", pdf.get("avs_detail", {}).get("salaire_moyen_carriere"))
     print("DEBUG bonifications:", pdf.get("avs_detail", {}).get("bonifications"))
-
+    print("DEBUG impact_pct:", pdf.get("avs_detail", {}).get("impact_pct"))
+    print("DEBUG annees_manquantes:", pdf.get("avs_detail", {}).get("annees_manquantes"))
     c = canvas.Canvas(output, pagesize=A4)
 
     # P1
