@@ -472,6 +472,23 @@ def page_synthese(c, pdf):
     part_avs = s.get("part_avs_pct")
     part_lpp = s.get("part_lpp_pct")
 
+    # =========================================================
+    # COHÉRENCE AFFICHAGE (IMPORTANT)
+    # On force le TOTAL affiché = AVS affiché + LPP affiché
+    # car round(a) + round(b) != round(a+b) dans certains cas
+    # =========================================================
+
+    # 1) Convertit les valeurs en float "safe" (gère None / string / "1 200 CHF")
+    avs_f = _to_float(avs_m) or 0.0
+    lpp_f = _to_float(lpp_m) or 0.0
+
+    # 2) Calcule ce qui sera vraiment affiché dans les cartes AVS/LPP (arrondi à l’unité)
+    avs_i = int(round(avs_f))
+    lpp_i = int(round(lpp_f))
+
+    # 3) Calcule le TOTAL affiché à partir des deux valeurs affichées
+    total_i = avs_i + lpp_i
+
     # Bloc orange (données AVS détail)
     annees_manquantes = avs_detail.get("annees_manquantes")
     impact_pct = avs_detail.get("impact_pct")
@@ -538,8 +555,11 @@ def page_synthese(c, pdf):
                         "Votre revenu mensuel total à la retraite")
 
     c.setFont("Helvetica-Bold", 34 * font_scale)
-    c.drawCentredString(inner_x + inner_w / 2, total_y + 1.15 * cm * scale,
-                        f"{fmt_int(total_m)} CHF" if total_m is not None else "—")
+    c.drawCentredString(
+        inner_x + inner_w / 2,
+        total_y + 1.15 * cm * scale,
+        f"{total_i:,}".replace(",", " ") + " CHF"
+    )
 
     # =========================================================
     # AVS + LPP
@@ -555,7 +575,8 @@ def page_synthese(c, pdf):
     c.drawString(inner_x + 1.0 * cm * scale, small_y + small_h - 1.1 * cm * scale, "AVS (1er Pilier)")
     c.setFont("Helvetica-Bold", 20 * font_scale)
     c.drawString(inner_x + 1.0 * cm * scale, small_y + 1.25 * cm * scale,
-                 f"{fmt_int(avs_m)} CHF" if avs_m is not None else "—")
+             f"{avs_i:,}".replace(",", " ") + " CHF")
+    
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 10.5 * font_scale)
     c.drawString(inner_x + 1.0 * cm * scale, small_y + 0.6 * cm * scale,
@@ -568,7 +589,8 @@ def page_synthese(c, pdf):
     c.drawString(lpp_x + 1.0 * cm * scale, small_y + small_h - 1.1 * cm * scale, "LPP (2ème Pilier)")
     c.setFont("Helvetica-Bold", 20 * font_scale)
     c.drawString(lpp_x + 1.0 * cm * scale, small_y + 1.25 * cm * scale,
-                 f"{fmt_int(lpp_m)} CHF" if lpp_m is not None else "—")
+             f"{lpp_i:,}".replace(",", " ") + " CHF")
+    
     c.setFillColor(GRAY)
     c.setFont("Helvetica", 10.5 * font_scale)
     c.drawString(lpp_x + 1.0 * cm * scale, small_y + 0.6 * cm * scale,

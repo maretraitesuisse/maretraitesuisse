@@ -21,16 +21,40 @@ from models.models import Base, Client, Simulation, WebhookDelivery
 from routes.avis import router as avis_router
 from pdf_generator import generer_pdf_retraite
 
-
-# =========================================================
-# INITIALISATION DB
-# =========================================================
-Base.metadata.create_all(bind=engine)
+import time
+from sqlalchemy import text
 
 # =========================================================
 # FASTAPI APP
 # =========================================================
 app = FastAPI()
+
+@app.on_event("startup")
+def startup_db():
+    """
+    Objectif:
+    - éviter que l'app crashe si Supabase/pooler met quelques secondes à répondre
+    - s'assurer que la DB est joignable
+    - créer les tables (si tu relies vraiment sur create_all)
+    """
+    for attempt in range(1, 11):  # 10 tentatives
+        try:
+            # 1) Ping DB (force une vraie connexion)
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+
+            # 2) Create tables (si nécessaire)
+            Base.metadata.create_all(bind=engine)
+
+            print("✅ DB OK + tables ensured")
+            return
+
+        except Exception as e:
+            print(f"⚠️ DB not ready (attempt {attempt}/10): {e}")
+            time.sleep(2)
+
+    # Si on arrive ici, la DB est toujours down après ~20s
+    raise RuntimeError("❌ DB unreachable after retries")
 
 # =========================================================
 # CORS
