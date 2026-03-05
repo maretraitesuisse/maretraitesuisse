@@ -1179,16 +1179,29 @@ def page_scenarios(c, pdf):
     # Extraction scénarios (inchangé)
     # =========================
     scenarios = {}
+
     if isinstance(pdf, dict):
         raw = pdf.get("scenarios")
+
         if isinstance(raw, dict):
             scenarios = raw
+
         elif isinstance(raw, list):
             for item in raw:
-                if isinstance(item, dict):
-                    k = item.get("key") or item.get("name") or item.get("type")
-                    if k:
-                        scenarios[str(k)] = item
+                if not isinstance(item, dict):
+                    continue
+    
+                nom = (item.get("nom") or "").strip().lower()
+
+                # Normalisation -> clés internes attendues par le PDF
+                if "sans" in nom:
+                    scenarios["sans_rachat"] = item
+
+                elif "rachat" in nom and "lpp" in nom:
+                    scenarios["rachat_lpp"] = item
+
+                elif "avs" in nom:
+                    scenarios["rachat_avs"] = item
 
     sans = scenarios.get("sans_rachat") or scenarios.get("sans") or {}
     rachat = scenarios.get("rachat_lpp") or scenarios.get("rachat") or {}
