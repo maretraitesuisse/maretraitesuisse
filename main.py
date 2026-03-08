@@ -20,6 +20,7 @@ from simulateur_avs_lpp import calcul_complet_retraite
 from models.models import Base, Client, Simulation, WebhookDelivery
 from routes.avis import router as avis_router
 from pdf_generator import generer_pdf_retraite
+from rate_limit import is_rate_limited
 
 import time
 from sqlalchemy import text
@@ -372,14 +373,21 @@ async def shopify_paid(
 
     return {"ok": True}
 
-
-
-
 # =========================================================
 # ROUTE : SUBMIT
 # =========================================================
 @app.post("/submit")
-def submit(payload: dict, db: Session = Depends(get_db)):
+def submit(payload: dict, request: Request, db: Session = Depends(get_db)):
+    
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host
+
+    rate_key = f"submit:{client_ip}"
+
+    if is_rate_limited(rate_key, limit=10, window_seconds=60):
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "error": "Trop de requêtes"}
+        )
 
     data = {
         "prenom": payload.get("prenom"),
