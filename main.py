@@ -10,7 +10,7 @@ import hmac
 import hashlib
 
 from fastapi import FastAPI, Depends, Request, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -27,7 +27,11 @@ from sqlalchemy import text
 # =========================================================
 # FASTAPI APP
 # =========================================================
-app = FastAPI()
+app = FastAPI(
+    docs_url=None if ENV == "production" else "/docs",
+    redoc_url=None if ENV == "production" else "/redoc",
+    openapi_url=None if ENV == "production" else "/openapi.json",
+)
 
 @app.on_event("startup")
 def startup_db():
@@ -61,11 +65,35 @@ def startup_db():
 # =========================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://maretraitesuisse.ch",
+        "https://www.maretraitesuisse.ch",
+        "https://cdn.shopify.com",
+    ],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+MAX_BODY_SIZE = 1024 * 1024  # 1 MB
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+
+    if content_length:
+        try:
+            if int(content_length) > MAX_BODY_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={"ok": False, "error": "Request too large"}
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "Invalid content-length"}
+            )
+
+    return await call_next(request)
 
 def note_attributes_to_dict(note_attrs):
     if isinstance(note_attrs, list):
@@ -421,9 +449,6 @@ def submit(payload: dict, db: Session = Depends(get_db)):
 # =========================================================
 app.include_router(avis_router, prefix="/api/avis")
 
-
-@app.get("/debug/pdf/{simulation_id}")
-def debug_pdf(simulation_id: int, db: Session = Depends(get_db)):
     simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
     if not simulation:
         return {"ok": False, "error": "Simulation introuvable"}
