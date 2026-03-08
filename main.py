@@ -150,6 +150,7 @@ def mask_email(email: str) -> str:
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
+EXPECTED_SHOP_DOMAIN = os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip().lower()
 
 SENDER = {
     "email": "noreply@maretraitesuisse.ch",
@@ -242,6 +243,25 @@ async def shopify_paid(
     webhook_id = (request.headers.get("X-Shopify-Webhook-Id") or "").strip()
     topic = (request.headers.get("X-Shopify-Topic") or "").strip()
     shop_domain = (request.headers.get("X-Shopify-Shop-Domain") or "").strip()
+    
+    if topic != "orders/paid":
+    print("❌ Topic Shopify inattendu:", topic)
+    return JSONResponse(
+        status_code=400,
+        content={"ok": False, "error": "Invalid webhook topic"}
+    )
+
+    if not EXPECTED_SHOP_DOMAIN:
+        print("❌ SHOPIFY_SHOP_DOMAIN non configuré")
+        return JSONResponse(status_code=500, content={"ok": False})
+
+    if shop_domain.lower() != EXPECTED_SHOP_DOMAIN:
+        print("❌ Webhook envoyé par un shop inconnu:", shop_domain)
+        return JSONResponse(
+            status_code=403,
+            content={"ok": False, "error": "Invalid shop"}
+        )
+    
     print("🔁 Shopify webhook delivery:", {"webhook_id": webhook_id, "topic": topic, "shop": shop_domain})
 
     
