@@ -245,10 +245,10 @@ async def shopify_paid(
     shop_domain = (request.headers.get("X-Shopify-Shop-Domain") or "").strip()
     
     if topic != "orders/paid":
-    print("❌ Topic Shopify inattendu:", topic)
-    return JSONResponse(
-        status_code=400,
-        content={"ok": False, "error": "Invalid webhook topic"}
+        print("❌ Topic Shopify inattendu:", topic)
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Invalid webhook topic"}
     )
 
     if not EXPECTED_SHOP_DOMAIN:
