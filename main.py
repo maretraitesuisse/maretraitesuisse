@@ -24,6 +24,8 @@ from pdf_generator import generer_pdf_retraite
 import time
 from sqlalchemy import text
 
+ENV = os.getenv("ENV", "production").lower()
+
 # =========================================================
 # FASTAPI APP
 # =========================================================
@@ -448,18 +450,6 @@ def submit(payload: dict, db: Session = Depends(get_db)):
 # ROUTES AVIS
 # =========================================================
 app.include_router(avis_router, prefix="/api/avis")
-
-    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
-    if not simulation:
-        return {"ok": False, "error": "Simulation introuvable"}
-
-    pdf_path = generer_pdf_retraite(
-        donnees=simulation.donnees,
-        resultats=simulation.resultat
-    )
-
-    return FileResponse(pdf_path, media_type="application/pdf", filename="projection_retraite.pdf")
-
 
 # =========================================================
 # BACKGROUND TASK PAIEMENT
