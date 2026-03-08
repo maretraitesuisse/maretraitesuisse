@@ -295,7 +295,11 @@ async def shopify_paid(
     print("🧾 order_id:", order_id, "| webhook_id:", webhook_id)
 
     if not webhook_id:
-        webhook_id = f"no-id:{order_id}"
+        print("❌ Webhook sans ID — refusé")
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Missing webhook id"}
+        )
 
 
     # =========================================================
@@ -385,10 +389,10 @@ async def shopify_paid(
     prenom = (client.prenom if client else "").strip()
 
     background_tasks.add_task(
-    process_paid_order,
-    simulation.id,
-    email_final,
-    prenom
+        process_paid_order,
+        simulation.id,
+        email_final,
+        prenom
     )
 
     return {"ok": True}
