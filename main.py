@@ -21,6 +21,7 @@ from models.models import Base, Client, Simulation, WebhookDelivery
 from routes.avis import router as avis_router
 from pdf_generator import generer_pdf_retraite
 from rate_limit import is_rate_limited
+from schemas import SubmitPayload
 
 import time
 from sqlalchemy import text
@@ -401,7 +402,22 @@ async def shopify_paid(
 # ROUTE : SUBMIT
 # =========================================================
 @app.post("/submit")
-def submit(payload: dict, request: Request, db: Session = Depends(get_db)):
+def submit(payload: SubmitPayload, request: Request, db: Session = Depends(get_db)):
+
+    origin = (request.headers.get("origin") or "").lower()
+    referer = (request.headers.get("referer") or "").lower()
+
+    allowed = [
+        "https://maretraitesuisse.ch",
+        "https://www.maretraitesuisse.ch"
+    ]
+
+    if not any(origin.startswith(a) for a in allowed) and not any(referer.startswith(a) for a in allowed):
+        print("❌ Requête /submit bloquée (origin non autorisé)", origin, referer)
+        return JSONResponse(
+            status_code=403,
+            content={"success": False, "error": "Forbidden"}
+        )
     
     client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host
 
@@ -413,34 +429,7 @@ def submit(payload: dict, request: Request, db: Session = Depends(get_db)):
             content={"success": False, "error": "Trop de requêtes"}
         )
 
-    data = {
-        "prenom": payload.get("prenom"),
-        "nom": payload.get("nom"),
-        "email": payload.get("email"),
-        "telephone": payload.get("telephone"),
-
-        "statut_civil": payload.get("statut_civil"),
-        "statut_pro": payload.get("statut_pro"),
-
-        "age_actuel": int(payload.get("age_actuel") or 0),
-        "age_retraite": int(payload.get("age_retraite") or 0),
-
-        "salaire_actuel": float(payload.get("salaire_actuel") or 0),
-        "salaire_moyen": float(payload.get("salaire_moyen") or 0),
-
-        "annees_cotisees": int(payload.get("annees_cotisees") or 0),
-        "annees_cotisees_lpp": int(payload.get("annees_cotisees_lpp") or 0),
-        "annees_be": int(payload.get("annees_be") or 0),
-        "annees_ba": int(payload.get("annees_ba") or 0),
-
-        "capital_lpp": float(payload.get("capital_lpp") or payload.get("capital_LPP") or 0),
-
-        "rente_conjoint": float(payload.get("rente_conjoint") or 0),
-
-        "has_3eme_pilier": parse_bool(payload.get("has_3eme_pilier") or payload.get("has_3eme_Pilier")),
-        "type_3eme_pilier": payload.get("type_3eme_pilier") or payload.get("type_3eme_Pilier"),
-
-    }
+    data = payload.model_dump()
 
 
     # CLIENT
