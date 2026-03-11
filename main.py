@@ -293,6 +293,31 @@ async def shopify_paid(
     order = payload.get("order", payload)
 
     order_id = order.get("id")
+
+    financial_status = (order.get("financial_status") or "").lower()
+
+    if financial_status != "paid":
+        print("❌ Commande non payée ignorée:", financial_status)
+        return {"ok": True}
+
+    line_items = order.get("line_items") or []
+
+    if not line_items:
+        print("❌ Commande sans produits")
+        return {"ok": False}
+    product_ok = False
+
+    for item in line_items:
+        title = (item.get("title") or "").lower()
+
+        if "simulation retraite" in title:
+            product_ok = True
+            break
+
+    if not product_ok:
+        print("❌ Produit inattendu dans la commande")
+        return {"ok": True}
+    
     print("🧾 order_id:", order_id, "| webhook_id:", webhook_id)
 
     if not webhook_id:
