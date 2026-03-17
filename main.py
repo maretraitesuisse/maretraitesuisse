@@ -152,6 +152,7 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
 EXPECTED_SHOP_DOMAIN = os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip().lower()
+EXPECTED_PRODUCT_ID = int(os.getenv("SHOPIFY_PRODUCT_ID", "0"))
 
 SENDER = {
     "email": "noreply@maretraitesuisse.ch",
@@ -305,12 +306,13 @@ async def shopify_paid(
     if not line_items:
         print("❌ Commande sans produits")
         return {"ok": False}
+    
     product_ok = False
 
     for item in line_items:
-        title = (item.get("title") or "").lower()
+        product_id = item.get("product_id")
 
-        if "simulation retraite" in title:
+        if product_id and int(product_id) == EXPECTED_PRODUCT_ID:
             product_ok = True
             break
 
