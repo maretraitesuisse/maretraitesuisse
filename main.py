@@ -378,6 +378,16 @@ async def shopify_paid(
     simulation_id_attr = (attrs.get("simulation_id") or "").strip()
     form_email_attr = (attrs.get("form_email") or "").strip().lower()
 
+    # =========================================================
+    # SÉCURITÉ — simulation_id obligatoire
+    # =========================================================
+    if not simulation_id_attr or not simulation_id_attr.isdigit():
+        print("❌ simulation_id manquant ou invalide dans note_attributes")
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Missing simulation_id"}
+        )
+
 
     # 📧 Email Shopify (fallback)
     email_shopify = (
@@ -418,27 +428,24 @@ async def shopify_paid(
                 .filter(Client.id == simulation.client_id)
                 .first()
             )
-
-    # 2) Fallback: si pas trouvé via simulation_id, chercher par email_final
-    if not simulation:
-        if not email_final:
-            print("❌ Aucun email exploitable (form_email ou shopify email)")
-            return {"ok": False}
+        if not simulation:
+            print("❌ simulation_id introuvable:", simulation_id_attr)
+            return JSONResponse(
+                status_code=404,
+                content={"ok": False, "error": "Simulation not found"}
+            )
 
         client = (
             db.query(Client)
-            .filter(Client.email.ilike(email_final))
+            .filter(Client.id == simulation.client_id)
             .first()
         )
-        if not client:
-            print("❌ Client introuvable pour email :", email_final)
-            return {"ok": False}
 
-        simulation = (
-            db.query(Simulation)
-            .filter(Simulation.client_id == client.id)
-            .order_by(Simulation.id.desc())
-            .first()
+        if not client:
+            print("❌ Client introuvable pour simulation:", simulation_id_attr)
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": "Client not found"}
         )
 
     if not simulation:
