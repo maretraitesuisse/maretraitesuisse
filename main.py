@@ -294,6 +294,13 @@ async def shopify_paid(
     order = payload.get("order", payload)
 
     order_id = order.get("id")
+    
+    if not order_id:
+        print("❌ order_id manquant")
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Missing order id"}
+        )
 
     financial_status = (order.get("financial_status") or "").lower()
 
@@ -331,15 +338,39 @@ async def shopify_paid(
 
 
     # =========================================================
-    # IDEMPOTENCE — empêcher doublons webhook
+    # IDEMPOTENCE — empêcher doublons webhook ET order_id
     # =========================================================
     try:
         db.add(WebhookDelivery(webhook_id=webhook_id, order_id=str(order_id)))
         db.commit()
     except IntegrityError:
         db.rollback()
-        print("🟡 Webhook déjà traité, on ignore :", webhook_id)
-        return {"ok": True}
+
+        existing_same_order = (
+            db.query(WebhookDelivery)
+            .filter(WebhookDelivery.order_id == str(order_id))
+            .first()
+        )
+
+        if existing_same_order:
+            print("🟡 Commande déjà traitée:", order_id)
+            return {"ok": True}
+
+        existing_same_webhook = (
+            db.query(WebhookDelivery)
+            .filter(WebhookDelivery.webhook_id == webhook_id)
+            .first()
+        )
+
+        if existing_same_webhook:
+            print("🟡 Webhook déjà traité, on ignore :", webhook_id)
+            return {"ok": True}
+
+        print("❌ IntegrityError inattendue sur WebhookDelivery")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": "Webhook persistence error"}
+        )
 
 
 

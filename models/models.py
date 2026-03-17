@@ -67,7 +67,7 @@ class Simulation(Base):
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
-    id = Column(Integer, primary_key=True)
-    webhook_id = Column(String, nullable=False, unique=True)
-    order_id = Column(String, nullable=True)
+    id = Column(Integer, primary_key=True, index=True)
+    webhook_id = Column(String, unique=True, nullable=False, index=True)
+    order_id = Column(String, unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
