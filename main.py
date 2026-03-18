@@ -28,6 +28,15 @@ from sqlalchemy import text
 
 ENV = os.getenv("ENV", "production").lower()
 
+def generate_secure_token(simulation_id: int) -> str:
+    secret = os.getenv("SHOPIFY_WEBHOOK_SECRET", "")
+    msg = str(simulation_id).encode()
+
+    return hmac.new(
+        secret.encode(),
+        msg,
+        hashlib.sha256
+    ).hexdigest()
 # =========================================================
 # FASTAPI APP
 # =========================================================
@@ -540,9 +549,12 @@ def submit(payload: SubmitPayload, request: Request, db: Session = Depends(get_d
 
     
 
+    token = generate_secure_token(simulation.id)
+
     return {
         "success": True,
         "simulation_id": simulation.id,
+        "secure_token": token,
         "resultat": resultat
     }
 
@@ -557,28 +569,59 @@ app.include_router(avis_router, prefix="/api/avis")
 def process_paid_order(simulation_id: int, email_final: str, prenom: str):
     db = SessionLocal()
     try:
+        # =========================================================
+        # 1. RÉCUPÉRATION SIMULATION
+        # =========================================================
         simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
         if not simulation:
             print("❌ simulation introuvable en background")
             return
 
+        # =========================================================
+        # 2. GÉNÉRATION PDF
+        # =========================================================
         pdf_path = generer_pdf_retraite(
             donnees=simulation.donnees,
             resultats=simulation.resultat
         )
 
-        # ✅ Email confirmation après paiement
+        # =========================================================
+        # 3. ENVOI EMAILS
+        # =========================================================
         envoyer_email(1, email_final, prenom)
 
-        # ✅ Email premium avec PDF
         envoyer_email_avec_pdf(2, email_final, prenom, pdf_path)
 
         print("✅ Emails envoyés à", email_final)
 
+        # =========================================================
+        # 4. SUPPRESSION PDF (IMPORTANT)
+        # =========================================================
+        try:
+            if pdf_path and os.path.exists(pdf_path):
+                os.remove(pdf_path)
+                print("🧹 PDF supprimé :", pdf_path)
+            else:
+                print("⚠️ PDF introuvable pour suppression :", pdf_path)
+        except Exception as e:
+            print("⚠️ Erreur suppression PDF :", str(e))
+
     finally:
         db.close()
 
+@app.get("/admin/regenerate-pdf/{simulation_id}")
+def regenerate_pdf(simulation_id: int, db: Session = Depends(get_db)):
+    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
 
+    if not simulation:
+        return {"error": "Simulation not found"}
+
+    pdf_path = generer_pdf_retraite(
+        donnees=simulation.donnees,
+        resultats=simulation.resultat
+    )
+
+    return FileResponse(pdf_path, filename="simulation.pdf")
 # =========================================================
 # PING
 # =========================================================
