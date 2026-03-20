@@ -383,9 +383,21 @@ async def shopify_paid(
 
 
 
-    attrs = note_attributes_to_dict(order.get("note_attributes") or [])
-    simulation_id_attr = (attrs.get("simulation_id") or "").strip()
-    form_email_attr = (attrs.get("form_email") or "").strip().lower()
+    line_items = order.get("line_items") or []
+
+    properties = {}
+
+    for item in line_items:
+        for prop in item.get("properties", []):
+            name = prop.get("name")
+            value = prop.get("value")
+            if name:
+                properties[name] = value
+
+    print("📦 properties Shopify:", properties)
+
+    simulation_id_attr = str(properties.get("simulation_id", "")).strip()
+    form_email_attr = str(properties.get("form_email", "")).strip().lower()
 
     # =========================================================
     # SÉCURITÉ — simulation_id obligatoire
