@@ -347,7 +347,100 @@ async def shopify_paid(
 
 
     # =========================================================
-    # IDEMPOTENCE — empêcher doublons webhook ET order_id
+    # LECTURE DES ATTRIBUTS SHOPIFY (cart attributes / note_attributes)
+    # =========================================================
+    raw_note_attributes = order.get("note_attributes") or order.get("attributes") or {}
+    attrs = note_attributes_to_dict(raw_note_attributes)
+
+    print("📦 raw_note_attributes Shopify:", raw_note_attributes)
+    print("📦 attrs Shopify:", attrs)
+
+    simulation_id_attr = str(attrs.get("simulation_id", "")).strip()
+    form_email_attr = str(attrs.get("form_email", "")).strip().lower()
+    form_prenom_attr = str(attrs.get("form_prenom", "")).strip()
+    secure_token_attr = str(attrs.get("secure_token", "")).strip()
+
+    # =========================================================
+    # SÉCURITÉ — simulation_id obligatoire
+    # =========================================================
+    if not simulation_id_attr or not simulation_id_attr.isdigit():
+        print("❌ simulation_id manquant ou invalide dans note_attributes")
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Missing simulation_id"}
+        )
+
+    # =========================================================
+    # SÉCURITÉ — secure_token obligatoire et valide
+    # =========================================================
+    expected_token = generate_secure_token(int(simulation_id_attr))
+
+    if not secure_token_attr:
+        print("❌ secure_token manquant dans note_attributes")
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Missing secure_token"}
+        )
+
+    if not hmac.compare_digest(secure_token_attr, expected_token):
+        print("❌ secure_token invalide")
+        return JSONResponse(
+            status_code=403,
+            content={"ok": False, "error": "Invalid secure_token"}
+        )
+
+    # 📧 Email Shopify (fallback)
+    email_shopify = (
+        order.get("email")
+        or order.get("customer", {}).get("email")
+        or ""
+    ).strip().lower()
+
+    # ✅ email à utiliser en priorité = celui du formulaire (si présent)
+    email_final = form_email_attr or email_shopify
+
+    if not email_final:
+        print("❌ email_final vide (ni form_email ni email shopify)")
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Missing email"}
+        )
+
+    print("🧾 order_name:", order.get("name"))
+    print("📦 note_attributes keys:", list(attrs.keys()))
+    print("🆔 simulation_id_attr:", simulation_id_attr)
+    print("🔐 secure_token reçu:", secure_token_attr[:12] + "..." if secure_token_attr else "")
+    print("📧 email_shopify:", mask_email(email_shopify))
+    print("📧 email_final:", mask_email(email_final))
+
+    simulation = (
+        db.query(Simulation)
+        .filter(Simulation.id == int(simulation_id_attr))
+        .first()
+    )
+
+    if not simulation:
+        print("❌ simulation_id introuvable:", simulation_id_attr)
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": "Simulation not found"}
+        )
+
+    client = (
+        db.query(Client)
+        .filter(Client.id == simulation.client_id)
+        .first()
+    )
+
+    if not client:
+        print("❌ Client introuvable pour simulation:", simulation_id_attr)
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": "Client not found"}
+        )
+
+    # =========================================================
+    # IDEMPOTENCE — seulement APRÈS validations sécurité
     # =========================================================
     try:
         db.add(WebhookDelivery(webhook_id=webhook_id, order_id=str(order_id)))
@@ -381,99 +474,7 @@ async def shopify_paid(
             content={"ok": False, "error": "Webhook persistence error"}
         )
 
-
-
-    line_items = order.get("line_items") or []
-
-    properties = {}
-
-    for item in line_items:
-        for prop in item.get("properties", []):
-            name = prop.get("name")
-            value = prop.get("value")
-            if name:
-                properties[name] = value
-
-    print("📦 properties Shopify:", properties)
-
-    simulation_id_attr = str(properties.get("simulation_id", "")).strip()
-    form_email_attr = str(properties.get("form_email", "")).strip().lower()
-
-    # =========================================================
-    # SÉCURITÉ — simulation_id obligatoire
-    # =========================================================
-    if not simulation_id_attr or not simulation_id_attr.isdigit():
-        print("❌ simulation_id manquant ou invalide dans note_attributes")
-        return JSONResponse(
-            status_code=400,
-            content={"ok": False, "error": "Missing simulation_id"}
-        )
-
-
-    # 📧 Email Shopify (fallback)
-    email_shopify = (
-        order.get("email")
-        or order.get("customer", {}).get("email")
-        or ""
-    ).strip().lower()
-
-    # ✅ email à utiliser en priorité = celui du formulaire (si présent)
-    email_final = form_email_attr or email_shopify
-    
-    if not email_final:
-        print("❌ email_final vide (ni form_email ni email shopify)")
-        return {"ok": False}
-
-
-    
-    print("🧾 order_name:", order.get("name"))
-
-    print("📦 note_attributes keys:", list(attrs.keys()))
-    print("🆔 simulation_id_attr:", simulation_id_attr)
-    print("📧 email_shopify:", mask_email(email_shopify))
-    print("📧 email_final:", mask_email(email_final))
-
-    simulation = None
-    client = None
-
-    # 1) ✅ Chercher directement la simulation via simulation_id (le plus fiable)
-    if simulation_id_attr.isdigit():
-        simulation = (
-            db.query(Simulation)
-            .filter(Simulation.id == int(simulation_id_attr))
-            .first()
-        )
-        if simulation:
-            client = (
-                db.query(Client)
-                .filter(Client.id == simulation.client_id)
-                .first()
-            )
-        if not simulation:
-            print("❌ simulation_id introuvable:", simulation_id_attr)
-            return JSONResponse(
-                status_code=404,
-                content={"ok": False, "error": "Simulation not found"}
-            )
-
-        client = (
-            db.query(Client)
-            .filter(Client.id == simulation.client_id)
-            .first()
-        )
-
-        if not client:
-            print("❌ Client introuvable pour simulation:", simulation_id_attr)
-            return JSONResponse(
-                status_code=500,
-                content={"ok": False, "error": "Client not found"}
-        )
-
-    if not simulation:
-        print("❌ Aucune simulation trouvée (ni par simulation_id, ni par email)")
-        return {"ok": False}
-
-    prenom = (client.prenom if client else "").strip()
+    prenom = (client.prenom or form_prenom_attr or "").strip()
 
     background_tasks.add_task(
         process_paid_order,
@@ -483,7 +484,7 @@ async def shopify_paid(
     )
 
     return {"ok": True}
-
+    
 # =========================================================
 # ROUTE : SUBMIT
 # =========================================================
