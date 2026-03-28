@@ -127,6 +127,7 @@ def calcul_complet_retraite(donnees: Dict) -> Dict:
         },
 
         "lpp_detail": {
+            "capital_actuel": data.get("capital_lpp", 0),
             "capital_final": lpp.get("capital_final"),
             "rente_mensuelle": lpp.get("rente_mensuelle"),
             "capital_history": [
