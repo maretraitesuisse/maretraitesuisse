@@ -474,7 +474,7 @@ async def shopify_paid(
             content={"ok": False, "error": "Webhook persistence error"}
         )
 
-    prenom = (client.prenom or form_prenom_attr or "").strip()
+    prenom = (form_prenom_attr or client.prenom or "").strip()
 
     background_tasks.add_task(
         process_paid_order,
@@ -581,45 +581,45 @@ app.include_router(avis_router, prefix="/api/avis")
 # =========================================================
 def process_paid_order(simulation_id: int, email_final: str, prenom: str):
     db = SessionLocal()
+    pdf_path = None
+
     try:
-        # =========================================================
-        # 1. RÉCUPÉRATION SIMULATION
-        # =========================================================
+        print(f"🚀 process_paid_order START | simulation_id={simulation_id} | email={email_final} | prenom={prenom}")
+
         simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
         if not simulation:
             print("❌ simulation introuvable en background")
             return
 
-        # =========================================================
-        # 2. GÉNÉRATION PDF
-        # =========================================================
+        print("✅ simulation récupérée")
+
         pdf_path = generer_pdf_retraite(
             donnees=simulation.donnees,
             resultats=simulation.resultat
         )
+        print("✅ PDF généré :", pdf_path)
 
-        # =========================================================
-        # 3. ENVOI EMAILS
-        # =========================================================
         envoyer_email(1, email_final, prenom)
+        print("✅ email confirmation envoyé")
 
         envoyer_email_avec_pdf(2, email_final, prenom, pdf_path)
+        print("✅ email PDF envoyé")
 
-        print("✅ Emails envoyés à", email_final)
+        print("✅ process_paid_order terminé")
 
-        # =========================================================
-        # 4. SUPPRESSION PDF (IMPORTANT)
-        # =========================================================
+    except Exception as e:
+        print("❌ ERREUR process_paid_order :", repr(e))
+        import traceback
+        traceback.print_exc()
+
+    finally:
         try:
             if pdf_path and os.path.exists(pdf_path):
                 os.remove(pdf_path)
                 print("🧹 PDF supprimé :", pdf_path)
-            else:
-                print("⚠️ PDF introuvable pour suppression :", pdf_path)
         except Exception as e:
             print("⚠️ Erreur suppression PDF :", str(e))
 
-    finally:
         db.close()
 
 @app.get("/admin/regenerate-pdf/{simulation_id}")
