@@ -162,7 +162,7 @@ BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 SHOPIFY_WEBHOOK_SECRET = os.getenv("SHOPIFY_WEBHOOK_SECRET")
 EXPECTED_SHOP_DOMAIN = os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip().lower()
 EXPECTED_PRODUCT_ID = int(os.getenv("SHOPIFY_PRODUCT_ID", "0"))
-
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 SENDER = {
     "email": "noreply@maretraitesuisse.ch",
     "name": "Ma Retraite Suisse"
@@ -263,8 +263,11 @@ async def shopify_paid(
     # Vérification Content-Type
     content_type = request.headers.get("Content-Type", "")
 
-    if "application/json" not in content_type:
+    # On accepte application/json même avec charset
+    if content_type and not content_type.lower().startswith("application/json"):
+
         print("❌ Content-Type invalide:", content_type)
+
         return JSONResponse(
             status_code=400,
             content={"ok": False, "error": "Invalid content type"}
@@ -645,19 +648,94 @@ def process_paid_order(simulation_id: int, email_final: str, prenom: str):
 
         db.close()
 
+
+# =========================
+# REGEN PDF 
+# =========================
+
 @app.get("/admin/regenerate-pdf/{simulation_id}")
-def regenerate_pdf(simulation_id: int, db: Session = Depends(get_db)):
-    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
+def regenerate_pdf_admin(
+    simulation_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+
+    # =========================
+    # SÉCURITÉ ADMIN
+    # =========================
+
+    token = request.headers.get("X-Admin-Token")
+
+    if not ADMIN_TOKEN:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "ADMIN_TOKEN non configuré"}
+        )
+
+    if token != ADMIN_TOKEN:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Accès non autorisé"}
+        )
+
+    print(f"🔁 Regénération PDF demandée pour simulation {simulation_id}")
+
+    # =========================
+    # RÉCUPÉRATION SIMULATION
+    # =========================
+
+    simulation = db.query(Simulation).filter(
+        Simulation.id == simulation_id
+    ).first()
 
     if not simulation:
-        return {"error": "Simulation not found"}
+        print("❌ Simulation introuvable")
 
-    pdf_path = generer_pdf_retraite(
-        donnees=simulation.donnees,
-        resultats=simulation.resultat
-    )
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Simulation introuvable"}
+        )
 
-    return FileResponse(pdf_path, filename="simulation.pdf")
+    if not simulation.resultat:
+        print("❌ Résultat manquant")
+
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Résultat manquant"}
+        )
+
+    try:
+
+        # =========================
+        # GÉNÉRATION PDF
+        # =========================
+
+        pdf_path = generer_pdf_retraite(
+            donnees=simulation.donnees,
+            resultat=simulation.resultat,
+            simulation_id=simulation.id
+        )
+
+        print("✅ PDF régénéré :", pdf_path)
+
+        # =========================
+        # RETOURNER LE FICHIER
+        # =========================
+
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=f"simulation_{simulation.id}.pdf"
+        )
+
+    except Exception as e:
+
+        print("❌ Erreur génération PDF :", str(e))
+
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
 # =========================================================
 # PING
 # =========================================================
