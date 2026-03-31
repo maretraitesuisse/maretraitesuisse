@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import UniqueConstraint
 from sqlalchemy.sql import func
 from database import Base
 
@@ -66,7 +67,15 @@ class Simulation(Base):
 
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
+    
+    def __repr__(self):
+        return f"<WebhookDelivery webhook_id={self.webhook_id} order_id={self.order_id}>"
 
+    __table_args__ = (
+    UniqueConstraint("webhook_id"),
+    UniqueConstraint("order_id"),
+    )
+    
     id = Column(Integer, primary_key=True, index=True)
     webhook_id = Column(String, unique=True, nullable=False, index=True)
     order_id = Column(String, unique=True, nullable=False, index=True)

@@ -180,15 +180,21 @@ def envoyer_email(template_id: int, email: str, prenom: str):
         "sender": SENDER
     }
 
-    resp = requests.post(
-        BREVO_URL,
-        json=payload,
-        headers={
-            "accept": "application/json",
-            "api-key": BREVO_API_KEY,
-            "content-type": "application/json"
-        }
-    )
+    try:
+        resp = requests.post(
+            BREVO_URL,
+            json=payload,
+            headers={
+                "accept": "application/json",
+                "api-key": BREVO_API_KEY,
+                "content-type": "application/json"
+            },
+            timeout=10
+        )
+
+    except Exception as e:
+        print("❌ Erreur Brevo :", str(e))
+        return
 
     print("📨 Brevo status:", resp.status_code)
     try:
@@ -217,15 +223,21 @@ def envoyer_email_avec_pdf(template_id, email, prenom, pdf_path):
         }]
     }
 
-    resp = requests.post(
-        BREVO_URL,
-        json=payload,
-        headers={
-            "accept": "application/json",
-            "api-key": BREVO_API_KEY,
-            "content-type": "application/json"
-        }
-    )
+    try:
+        resp = requests.post(
+            BREVO_URL,
+            json=payload,
+            headers={
+                "accept": "application/json",
+                "api-key": BREVO_API_KEY,
+                "content-type": "application/json"
+            },
+            timeout=10
+        )
+
+    except Exception as e:
+        print("❌ Erreur Brevo PDF :", str(e))
+        return
 
     print("📨 Brevo status:", resp.status_code)
     try:
@@ -247,6 +259,17 @@ async def shopify_paid(
 
     # 🔐 Vérification HMAC Shopify
     body = await request.body()
+
+    # Vérification Content-Type
+    content_type = request.headers.get("Content-Type", "")
+
+    if "application/json" not in content_type:
+        print("❌ Content-Type invalide:", content_type)
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Invalid content type"}
+        )
+
 
     # =========================
     # DEBUG SHOPIFY HEADERS
