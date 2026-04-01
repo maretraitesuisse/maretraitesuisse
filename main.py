@@ -515,8 +515,17 @@ async def shopify_paid(
 # ROUTE : SUBMIT
 # =========================================================
 @app.post("/submit")
-def submit(payload: SubmitPayload, request: Request, db: Session = Depends(get_db)):
+async def submit(
+    payload: SubmitPayload,
+    request: Request,
+    db: Session = Depends(get_db)
+):
 
+    try:
+        data = await request.json()
+        print("PAYLOAD RECU =", data)
+    except Exception as e:
+        print("ERREUR LECTURE PAYLOAD =", e)
     origin = (request.headers.get("origin") or "").lower()
     referer = (request.headers.get("referer") or "").lower()
 
